@@ -1,0 +1,54 @@
+# Camera + object assumptions for geometric distance estimation.
+#
+# EVERY number here is an assumption or a calibration result. The distance
+# code never hard-codes any of them. Change a value, rerun, and you have a
+# sensitivity analysis.
+
+active_camera: bdd100k
+
+cameras:
+  # BDD100K: crowd-sourced phone dashcams, 1280x720. The dataset does NOT
+  # publish per-video intrinsics, so we assume a typical phone horizontal FOV
+  # of ~65 deg:  f = (W/2) / tan(HFOV/2) = 640 / tan(32.5 deg) ~ 1005 px.
+  bdd100k:
+    image_size: [1280, 720]
+    hfov_deg: 65.0
+    mount_height_m: 1.30        # typical windshield-mounted phone
+    pitch_deg: 0.0              # assume level camera -> horizon at the image centre row
+    focal_rel_uncertainty: 0.10 # unknown camera, so +/-10 % on f
+
+  # Your own camera after running:  python -m scripts.calibrate_camera ...
+  # Paste the printed fx/fy/cx/cy here. Calibrated f is good to ~1-2 %.
+  my_camera:
+    image_size: [1280, 720]
+    fx: 1000.0                  # placeholder: replace with calibration output
+    fy: 1000.0
+    cx: 640.0
+    cy: 360.0
+    mount_height_m: 0.50        # measure with a tape for your setup
+    pitch_deg: 0.0
+    focal_rel_uncertainty: 0.02
+
+# Real-world heights of the *visible box*. Use height (not width) because it
+# barely changes as the object rotates.
+objects:
+  cone:
+    height_m: 0.70              # common 28" road cone; small cones are 0.45 m, tall 0.91 m
+    height_rel_uncertainty: 0.25
+    on_ground: true
+  barrier:
+    height_m: 0.80              # Jersey barrier ~0.81 m; plastic barricades ~1.0 m
+    height_rel_uncertainty: 0.25
+    on_ground: true
+  stop_sign:
+    height_m: 0.75              # standard 30" octagon plate (the box covers the plate, not the pole)
+    height_rel_uncertainty: 0.15
+    on_ground: false            # mounted on a pole, so the ground-plane method does not apply
+
+distance:
+  method: pinhole               # pinhole | ground | fused
+  min_box_px: 10                # shorter boxes -> flagged "tiny" (1 px error = >10 % error)
+  border_margin_px: 2           # boxes touching the border -> flagged "truncated"
+  min_distance_m: 0.3
+  max_distance_m: 150.0
+  fuse_max_disagreement: 0.30   # fused: average the two only if they agree within 30 %

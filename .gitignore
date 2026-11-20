@@ -2,7 +2,8 @@
 .venv/
 
 # Data and training outputs
-data/
+data/*
+!data/.gitkeep
 runs/
 
 # Model weights and exports
@@ -14,3 +15,13 @@ runs/
 # Python / Jupyter caches
 __pycache__/
 .ipynb_checkpoints/
+
+# Exported models (machine-specific)
+models/
+
+# Downloaded pretrained weights land in the repo root
+/yolo*.pt
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/

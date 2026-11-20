@@ -5,7 +5,7 @@ This project has two flows that share one model artefact:
 - **Online flow (runtime):** what runs on the robot for every camera frame.
 - **Offline flow (build-time):** what produces, compresses and measures the model that the online flow uses.
 
-Stage-to-file mapping follows [PLAN.md §7](PLAN.md#7-repo-structure). The files listed below don't exist yet. They are the planned locations.
+Stage-to-file mapping follows [PLAN.md §7](PLAN.md#7-repo-structure). All of the files below now exist. [MODULES.md](MODULES.md) gives a reading order. A few files were added beyond the original plan: `src/types.py`, `src/config.py`, `src/classes.py`, `src/evaluation.py`, `src/timing.py`, `src/reporting.py`, `src/data/*`, `scripts/review_data.py`, `scripts/evaluate.py`, `scripts/prune.py`, `scripts/calibrate_camera.py`, `scripts/validate_distance.py` and `scripts/make_synthetic_data.py`. `data.yaml` is generated at `data/merged/data.yaml`, not `configs/`, because it contains an absolute path that only works on one machine.
 
 ---
 

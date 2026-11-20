@@ -1,0 +1,38 @@
+# Fine-tuning recipe. Any key here is passed straight to Ultralytics
+# model.train(); see https://docs.ultralytics.com/modes/train/#train-settings
+#
+# Tuned for an RTX 3050 Ti laptop (4 GB VRAM, 14 GB RAM).
+
+common:
+  data: data/merged/data.yaml
+  imgsz: 640
+  epochs: 50
+  patience: 15          # stop early if val mAP hasn't improved for 15 epochs
+  optimizer: auto       # Ultralytics picks SGD/AdamW + lr from dataset size
+  cos_lr: true          # cosine learning-rate decay: smoother end of training
+  close_mosaic: 10      # turn mosaic augmentation off for the last 10 epochs
+  amp: true             # mixed precision: ~2x less VRAM, faster on Ampere
+  workers: 4            # dataloader processes; more just eats RAM on 14 GB
+  cache: false          # "ram" would not fit; "disk" speeds up later epochs if you have space
+  seed: 0
+  deterministic: true
+  plots: true
+  project: runs/detect
+
+# Per-model overrides. Pick one with --model.
+models:
+  yolo11n:
+    model: yolo11n.pt   # COCO-pretrained nano (2.6 M params)
+    batch: 16
+    name: yolo11n_ft
+  yolo11s:
+    model: yolo11s.pt   # small (9.4 M params): the "heavier backbone" comparison
+    batch: 8
+    epochs: 40
+    name: yolo11s_ft
+
+# --smoke: quick sanity run to catch path/label bugs before the long run.
+smoke:
+  epochs: 3
+  fraction: 0.1         # use 10 % of the training images
+  name_suffix: _smoke

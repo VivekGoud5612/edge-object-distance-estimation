@@ -1,0 +1,2 @@
+# Only needed to run the unit tests: python -m pytest
+pytest==9.2.0
