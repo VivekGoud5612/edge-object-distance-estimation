@@ -1,0 +1,111 @@
+# ERIC Robotics obstacle detection: pinned environment
+# Created 2026-11-20 on Ubuntu, Python 3.14.4, NVIDIA driver 595.99.02 (CUDA 13.2), RTX 3050 Ti Laptop 4 GB
+# torch/torchvision from the default PyPI index are the CUDA 13.2 builds (+cu132).
+# Install: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# Run with PYTHONPATH unset if ROS is sourced:  env -u PYTHONPATH .venv/bin/python ...
+
+# ---- Direct dependencies (requested) ----
+ultralytics==8.4.216
+onnx==1.23.2
+onnxslim==0.1.99
+onnxruntime-gpu==1.32.0
+openvino==2026.4.1
+opencv-python==5.1.0.95
+numpy==2.4.6
+pandas==3.1.1
+matplotlib==3.11.2
+PyYAML==6.0.3
+tqdm==4.70.1
+roboflow==1.7.3
+pycocotools==2.0.11
+torch==2.15.0
+torchvision==0.29.2
+
+# ---- Added during setup ----
+# nncf: OpenVINO INT8 quantisation backend (Ultralytics would otherwise auto-install it unpinned at export time)
+nncf==3.4.0
+# nvidia-curand: libcurand.so.10 needed by onnxruntime-gpu's CUDA provider (not shipped with torch)
+nvidia-curand==10.4.5.25
+
+# ---- Transitive dependencies (pinned for reproducibility) ----
+annotated-doc==0.0.7
+anyio==4.16.0
+certifi==2026.10.23
+charset-normalizer==3.5.2
+click==8.5.1
+cloudpickle==3.1.3
+colorama==0.4.6
+contourpy==1.4.0
+cuda-bindings==13.5.0
+cuda-pathfinder==1.9.1
+cuda-toolkit==13.2.2
+cycler==0.12.1
+filelock==4.2.12
+filetype==1.2.0
+flatbuffers==25.12.19
+fonttools==4.68.0
+fsspec==2026.9.0
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.20
+Jinja2==3.1.6
+joblib==1.6.0
+kiwisolver==1.5.1
+markdown-it-py==4.3.0
+MarkupSafe==3.0.4
+mdurl==0.1.2
+ml_dtypes==0.7.0
+mpmath==1.3.0
+narwhals==2.29.0
+networkx==3.6.1
+ninja==1.13.2
+nvidia-cublas==13.4.1.3
+nvidia-cuda-cccl==13.3.5.0.6
+nvidia-cuda-cupti==13.2.86
+nvidia-cuda-nvrtc==13.2.86
+nvidia-cuda-runtime==13.2.86
+nvidia-cudnn-cu13==9.26.0.51
+nvidia-cufft==12.2.0.57
+nvidia-cufile==1.17.1.22
+nvidia-cusolver==12.2.0.11
+nvidia-cusparse==12.7.10.12
+nvidia-cusparselt-cu13==0.8.1
+nvidia-ml-py==13.615.71
+nvidia-nccl-cu13==2.30.7
+nvidia-nvjitlink==13.5.37
+nvidia-nvshmem-cu13==3.7.2
+nvidia-nvtx==13.2.86
+opencv-python-headless==5.1.0.95
+openvino-telemetry==2025.2.0
+packaging==26.3
+pillow==13.0.0
+pillow-avif-plugin==1.6.0
+polars==2.1.0
+polars-runtime-32==2.1.0
+protobuf==7.36.2
+psutil==7.2.2
+pydot==4.0.1
+Pygments==2.21.0
+pyparsing==3.3.3
+python-dateutil==4.0.0
+python-dotenv==1.2.4
+requests==2.34.2
+requests-toolbelt==1.0.0
+rich==15.0.0
+safetensors==0.8.0
+scikit-learn==1.9.1
+scipy==1.18.1
+setuptools==84.2.1
+shellingham==1.5.4
+six==1.17.0
+sympy==1.14.0
+tabulate==0.10.0
+threadpoolctl==3.8.0
+triton==3.9.0
+typer==0.25.1
+typing_extensions==4.16.0
+tzdata==2026.6
+ultralytics-platform==0.1.119
+ultralytics-thop==2.2.5
+urllib3==2.8.0

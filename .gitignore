@@ -1,0 +1,16 @@
+# Environment
+.venv/
+
+# Data and training outputs
+data/
+runs/
+
+# Model weights and exports
+*.pt
+*.onnx
+*.engine
+*_openvino_model/
+
+# Python / Jupyter caches
+__pycache__/
+.ipynb_checkpoints/
