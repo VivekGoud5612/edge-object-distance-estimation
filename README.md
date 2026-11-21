@@ -110,8 +110,9 @@ TensorRT has no Python 3.14 build yet, so the GPU FP16 row uses ONNX Runtime CUD
 
 ```bash
 # 0. environment (see docs/SETUP.md). If ROS is sourced, prefix commands with: env -u PYTHONPATH
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt        # exact pins (or: uv pip install -r requirements.txt)
+#   uv users: `uv sync` also works now (deps are listed in pyproject.toml)
 export ROBOFLOW_API_KEY=...            # free account, Settings → API key
 
 # 1. data: download, remap, merge, split; then LOOK at it
