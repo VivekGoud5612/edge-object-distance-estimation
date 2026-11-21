@@ -54,6 +54,29 @@ def hardware_info() -> dict[str, str]:
     return info
 
 
+def _isolated_worker(entry, device, paths, runs, warmup, accuracy_dir, max_eval):
+    """Child-process body: load the images itself (cheaper than pickling them)."""
+    images = [cv2.imread(str(p)) for p in paths]
+    return benchmark_one(entry, device, images, runs, warmup, accuracy_dir, max_eval)
+
+
+def benchmark_isolated(entry: dict, device: str, paths: list[Path], runs: int, warmup: int,
+                       accuracy_dir: Path | None, max_eval: int | None) -> dict:
+    """Run one benchmark in a fresh 'spawn' process.
+
+    Why: on some Linux laptops OpenVINO's NPU plugin segfaults inside the
+    system Level Zero loader (zeInitDrivers) when a SECOND ov.Core is created
+    in the same process. Ultralytics makes a new Core per model, so the whole
+    benchmark died at the second OpenVINO model. A fresh process per OpenVINO
+    model sidesteps it, and a crash then only loses that one row.
+    """
+    import concurrent.futures as cf
+    import multiprocessing as mp
+    with cf.ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn")) as ex:
+        return ex.submit(_isolated_worker, entry, device, paths, runs, warmup,
+                         accuracy_dir, max_eval).result()
+
+
 def benchmark_one(entry: dict, device: str, images: list[np.ndarray], runs: int, warmup: int,
                   accuracy_dir: Path | None, max_eval: int | None) -> dict:
     weights = str(REPO_ROOT / entry["path"])
@@ -123,6 +146,8 @@ def main() -> None:
     ap.add_argument("--warmup", type=int, default=20)
     ap.add_argument("--no-accuracy", action="store_true")
     ap.add_argument("--max-eval-images", type=int, default=None)
+    ap.add_argument("--isolate", action="store_true",
+                    help="run every model in its own process (OpenVINO models always are)")
     ap.add_argument("--out", default="results/benchmark")
     args = ap.parse_args()
 
@@ -145,8 +170,12 @@ def main() -> None:
                 continue
             print(f"--> {entry['name']} on {device}")
             try:
-                row = benchmark_one(entry, device, images, args.runs, args.warmup,
-                                    accuracy_dir, args.max_eval_images)
+                if entry["format"] == "openvino" or args.isolate:
+                    row = benchmark_isolated(entry, device, paths, args.runs, args.warmup,
+                                             accuracy_dir, args.max_eval_images)
+                else:
+                    row = benchmark_one(entry, device, images, args.runs, args.warmup,
+                                        accuracy_dir, args.max_eval_images)
                 rows.append(row)
                 print(f"    {row['mean_ms']:.1f} ms mean, {row['p95_ms']:.1f} ms p95, {row['fps']:.1f} FPS"
                       + (f", mAP50-95 {row['mAP50-95']:.3f}" if "mAP50-95" in row else ""))
@@ -157,10 +186,11 @@ def main() -> None:
     if df.empty:
         raise SystemExit("nothing benchmarked")
     df.insert(0, "hardware", [hw["gpu"] if d == "GPU" else hw["cpu"] for d in df.device])
-    csv_path, _ = save_table(df, REPO_ROOT / args.out)
-    plot_tradeoff(df, (REPO_ROOT / args.out).with_name(Path(args.out).name + "_tradeoff.png"))
+    out = Path(args.out) if Path(args.out).is_absolute() else REPO_ROOT / args.out
+    csv_path, _ = save_table(df, out)
+    plot_tradeoff(df, out.with_name(out.name + "_tradeoff.png"))
     print("\n" + df.drop(columns=["hardware"]).round(2).to_string(index=False))
-    print(f"\nsaved {csv_path.relative_to(REPO_ROOT)}")
+    print(f"\nsaved {csv_path}")
 
 
 if __name__ == "__main__":
