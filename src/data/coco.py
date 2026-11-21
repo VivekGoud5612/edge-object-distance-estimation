@@ -13,29 +13,41 @@ Crowd annotations (iscrowd=1, a single box around a group) are skipped.
 from __future__ import annotations
 
 import random
-import urllib.request
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from tqdm import tqdm
 
+from src.data.download import download_file
 from src.data.yolo_labels import YoloBox
 
 ANNOTATIONS_URL = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
 
 
 def ensure_annotations(raw_dir: str | Path) -> Path:
-    """Download + unzip COCO annotations if needed; return the annotations/ folder."""
+    """Download + unzip COCO annotations if needed; return the annotations/ folder.
+
+    Safe to re-run: a complete zip already in raw_dir (e.g. fetched by hand
+    with `wget -c -P data/raw/coco <ANNOTATIONS_URL>`) is reused; a truncated
+    one is resumed.
+    """
     raw_dir = Path(raw_dir)
     ann_dir = raw_dir / "annotations"
-    if (ann_dir / "instances_train2017.json").exists():
+    if (ann_dir / "instances_train2017.json").exists() and (ann_dir / "instances_val2017.json").exists():
         return ann_dir
     raw_dir.mkdir(parents=True, exist_ok=True)
     zip_path = raw_dir / "annotations_trainval2017.zip"
+
+    if zip_path.exists() and not _is_complete_zip(zip_path):
+        # Truncated (interrupted wget or old run): turn it into a .part so it gets resumed.
+        print(f"[coco] {zip_path.name} is incomplete, resuming it")
+        zip_path.rename(zip_path.with_name(zip_path.name + ".part"))
     if not zip_path.exists():
         print(f"[coco] downloading annotations (~250 MB) -> {zip_path}")
-        urllib.request.urlretrieve(ANNOTATIONS_URL, zip_path)
+        print(f"       (if this is slow, you can instead run: wget -c -P {raw_dir} {ANNOTATIONS_URL})")
+        download_file(ANNOTATIONS_URL, zip_path)
+
     with zipfile.ZipFile(zip_path) as zf:
         # Only the two detection files; the zip also has captions/keypoints.
         for member in ("annotations/instances_train2017.json", "annotations/instances_val2017.json"):
@@ -43,12 +55,19 @@ def ensure_annotations(raw_dir: str | Path) -> Path:
     return ann_dir
 
 
+def _is_complete_zip(path: Path) -> bool:
+    """A zip's index sits at the END of the file, so a truncated download fails this check."""
+    try:
+        with zipfile.ZipFile(path) as zf:
+            return "annotations/instances_val2017.json" in zf.namelist()
+    except zipfile.BadZipFile:
+        return False
+
+
 def _download(url_and_path: tuple[str, Path]) -> bool:
     url, path = url_and_path
-    if path.exists():
-        return True
     try:
-        urllib.request.urlretrieve(url, path)
+        download_file(url, path, timeout=30, retries=3, progress=False)
         return True
     except Exception as e:  # network hiccup: skip the image, don't kill the whole run
         print(f"[coco] failed {url}: {e}")
