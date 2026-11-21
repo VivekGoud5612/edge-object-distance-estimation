@@ -153,7 +153,7 @@ def main() -> None:
     report.append("Model: `box_height = (H / h_cam) · (bottom_row − horizon_row)` for objects standing on "
                   "flat ground. Focal length and distance cancel, so this needs no distance labels.\n")
     report.append("Fitted in log space, `log h = log a + k·log(y − y0)`, with boxes weighted by "
-                  "1/variance of their size quartile. Flat ground + pinhole says **k = 1**. Each image "
+                  "1/variance of their range quartile. Flat ground + pinhole says **k = 1**. Each image "
                   "resolution is fitted separately because different resolutions are different cameras "
                   "(different height and horizon); the pooled fit is shown only to show why mixing is wrong.\n")
     fits = {}
@@ -176,9 +176,11 @@ def main() -> None:
             fits[key] = fit
             report.append(f"### {key} ({fit['n_boxes']} boxes, {fit['n_images']} images)\n")
             report += [f"- {line}" for line in interpret_ground_fit(fit, prior.height_m, f_norm)]
-            report.append("\nScatter by box height (heteroscedasticity; equal values = constant "
-                          "relative noise):\n")
-            report.append(to_markdown(fit["scatter_by_size"]))
+            report.append("\nResiduals by range quartile (bins on the bottom row, NOT on box height, "
+                          "which would cut the residuals and fake a small scatter). `median_resid` != 0 "
+                          "means the k = 1 curve misses that range; unequal `log_scatter` = "
+                          "heteroscedastic:\n")
+            report.append(to_markdown(fit["scatter_by_row"]))
             tag = key.replace(" @ ", "_")
             report.append(f"\n![{key}](ground_fit_{tag}.png) ![{key} residuals](residuals_{tag}.png)\n")
             fit_rows.append({"class": cls, "resolution": res, "n_boxes": fit["n_boxes"],
@@ -224,8 +226,13 @@ def main() -> None:
         sd = fits[main_key]["estimates"]["resid_robust_std"].value
         budgets["measured height spread"] = monte_carlo_error(
             DISTANCES, prior.height_m, sd, f0, cfg.camera.focal_rel_uncertainty, box_err, box_h)
+        # Lower bound: the scatter left after removing the k = 1 curve's misfit per
+        # range band. The truth lies between this and the raw scatter.
+        sd_w = fits[main_key]["estimates"]["resid_std_within_rowbin"].value
+        budgets["measured spread, misfit removed"] = monte_carlo_error(
+            DISTANCES, prior.height_m, sd_w, f0, cfg.camera.focal_rel_uncertainty, box_err, box_h)
         budgets["calibrated camera"] = monte_carlo_error(
-            DISTANCES, prior.height_m, sd, f0, 0.02, box_err, box_h)
+            DISTANCES, prior.height_m, sd_w, f0, 0.02, box_err, box_h)
     report.append("## Combined error budget (cone, Monte Carlo, 20k draws per distance)\n")
     report.append("Error = estimated / true distance − 1. Sources: real cone height varies, focal length "
                   "uncertain, detector box error resampled from A3 (if run). Height spread taken from "
