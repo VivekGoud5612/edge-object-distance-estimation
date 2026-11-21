@@ -17,6 +17,21 @@ cameras:
     pitch_deg: 0.0              # assume level camera -> horizon at the image centre row
     focal_rel_uncertainty: 0.10 # unknown camera, so +/-10 % on f
 
+  # ROADWork 1080p dash-cams, FITTED from the labels by
+  # scripts/distance_analysis.py (docs/FINDINGS.md): box height vs bottom row
+  # gives H/h_cam = 0.275 and the horizon at 50.5 % of the image height
+  # (level camera). With the 0.70 m cone prior that means h_cam = 0.70/0.275
+  # = 2.54 m, so the pinhole and ground-plane estimates agree on average
+  # (with bdd100k values they disagree by ~2x). Caveat: the 1080p set pools
+  # 18 city fleets (horizons 44-64 %), so this is an average camera, and the
+  # focal length is still the 65 deg assumption (f = 960/tan(32.5) = 1507 px).
+  roadwork_1080p:
+    image_size: [1920, 1080]
+    hfov_deg: 65.0
+    mount_height_m: 2.54
+    pitch_deg: 0.0
+    focal_rel_uncertainty: 0.10
+
   # Your own camera after running:  python -m scripts.calibrate_camera ...
   # Paste the printed fx/fy/cx/cy here. Calibrated f is good to ~1-2 %.
   my_camera:
@@ -34,11 +49,11 @@ cameras:
 objects:
   cone:
     height_m: 0.70              # common 28" road cone; small cones are 0.45 m, tall 0.91 m
-    height_rel_uncertainty: 0.25
+    height_rel_uncertainty: 0.40  # MEASURED on ROADWork: robust log scatter 0.38-0.46 (docs/FINDINGS.md); was 0.25
     on_ground: true
   barrier:
-    height_m: 0.80              # Jersey barrier ~0.81 m; plastic barricades ~1.0 m
-    height_rel_uncertainty: 0.25
+    height_m: 0.80              # Jersey barrier ~0.81 m; plastic barricades ~1.0 m; drums ~0.9 m (v2 data)
+    height_rel_uncertainty: 0.40  # measured log scatter ~0.44-0.57 for ROADWork barriers+drums; was 0.25
     on_ground: true
   stop_sign:
     height_m: 0.75              # standard 30" octagon plate (the box covers the plate, not the pole)

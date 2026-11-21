@@ -12,7 +12,7 @@ common:
   cos_lr: true          # cosine learning-rate decay: smoother end of training
   close_mosaic: 10      # turn mosaic augmentation off for the last 10 epochs
   amp: true             # mixed precision: ~2x less VRAM, faster on Ampere
-  workers: 4            # dataloader processes; more just eats RAM on 14 GB
+  workers: 2            # dataloader processes; 4 ran the 14 GB laptop out of RAM (val uses 2x)
   cache: false          # "ram" would not fit; "disk" speeds up later epochs if you have space
   seed: 0
   deterministic: true

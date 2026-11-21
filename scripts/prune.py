@@ -39,8 +39,13 @@ def prune_model(weights: str, amount: float, out_path: Path) -> float:
 
     model = YOLO(weights)
     total = zeros = 0
-    for module in model.model.modules():
-        if isinstance(module, torch.nn.Conv2d):
+    for name, module in model.model.named_modules():
+        # Skip the Detect head's DFL conv: its weights are the FIXED bin values
+        # 0, 1, ..., 15 that turn the predicted distribution into a box offset.
+        # It isn't learned, and zeroing "small" ones (the 1, the 2...) shifts
+        # every box edge: a first version of this script pruned it and mAP
+        # collapsed to 0.17 at only 10 % sparsity.
+        if isinstance(module, torch.nn.Conv2d) and "dfl" not in name:
             prune.l1_unstructured(module, name="weight", amount=amount)
             prune.remove(module, "weight")         # make the zeros permanent (drop the mask)
             total += module.weight.numel()
