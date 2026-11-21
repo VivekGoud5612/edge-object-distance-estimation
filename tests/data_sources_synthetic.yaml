@@ -1,0 +1,11 @@
+# Config for the end-to-end smoke test on synthetic data (no downloads).
+output_dir: data/merged_synthetic
+raw_dir: data/raw
+seed: 0
+sources:
+  synthetic:
+    type: local_yolo
+    enabled: true
+    path: data/raw/synthetic
+    names: [cone, barrier, stop_sign]
+    class_map: {cone: cone, barrier: barrier, stop_sign: stop_sign}

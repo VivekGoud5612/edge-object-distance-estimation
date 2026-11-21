@@ -1,0 +1,17 @@
+[project]
+name = "edge-object-distance-estimation"
+version = "0.1.0"
+description = "Cone / barrier / stop-sign detection with geometric distance estimation, optimised for edge devices"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "B"]
+ignore = ["B905", "E501"]
