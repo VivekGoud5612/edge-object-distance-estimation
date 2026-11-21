@@ -53,9 +53,10 @@ def _fill_splits(name: str, samples: list[Sample], cfg: dict, split_cfg: dict, s
     # Images that will be dropped anyway (none of our classes) shouldn't count.
     kept = [s for s in samples if s.boxes]
     info = fill_missing_splits(kept, float(split_cfg.get("val", 0.1)), float(split_cfg.get("test", 0.1)),
-                               seed, cfg.get("group_regex"))
+                               seed, cfg.get("group_regex"), cfg.get("group_block"))
     print(f"[{name}] splits: train {info['train']}, val {info['val']}, test {info['test']} "
-          f"({info['groups']} groups; group_regex={cfg.get('group_regex')!r})")
+          f"({info['groups']} groups; group_regex={cfg.get('group_regex')!r}, "
+          f"group_block={cfg.get('group_block')})")
 
 
 def prepare_coco(name: str, cfg: dict, raw_dir: Path, seed: int) -> list[Sample]:

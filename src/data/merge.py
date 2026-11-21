@@ -132,23 +132,31 @@ def original_stem(path: Path) -> str:
     return _RF_SUFFIX.sub("", path.stem)
 
 
-def group_key(path: Path, group_regex: str | None) -> str:
-    """Images with the same key always land in the same split.
+def group_key(path: Path, group_regex: str | None = None, group_block: int | None = None) -> str:
+    r"""Images with the same key always land in the same split.
 
-    With `group_regex` (first capture group), you can group whole video
-    sequences, e.g. r"^(.*)_\d+$" turns 'seqA_000123' into 'seqA', so
-    near-identical neighbouring frames can't sit in train AND test.
+    group_regex: first capture group becomes the key, e.g. r"^(.*)_\d+$" turns
+        'seqA_000123' into 'seqA' (one key per video sequence).
+    group_block: bucket by the LAST number in the name, e.g. with 25,
+        IMG_3931 .. IMG_3949 -> 'IMG_#157'. Phone photos taken in a burst have
+        consecutive numbers and near-identical content, so this keeps a burst
+        together instead of splitting it across train and test.
     """
     stem = original_stem(path)
     if group_regex:
         m = re.match(group_regex, stem)
         if m:
-            return m.group(1)
+            stem = m.group(1)
+    if group_block:
+        m = re.search(r"(\d+)(?!.*\d)", stem)   # last run of digits
+        if m:
+            stem = f"{stem[:m.start()]}#{int(m.group(1)) // group_block}"
     return stem
 
 
 def fill_missing_splits(samples: list[Sample], val_fraction: float, test_fraction: float,
-                        seed: int, group_regex: str | None = None) -> dict[str, int]:
+                        seed: int, group_regex: str | None = None,
+                        group_block: int | None = None) -> dict[str, int]:
     """Give a source val/test splits if it has none, by moving GROUPS out of train.
 
     Splits that already exist are left alone. Fractions are of the source's
@@ -161,7 +169,7 @@ def fill_missing_splits(samples: list[Sample], val_fraction: float, test_fractio
     pool = [s for s in samples if s.split == "train"]
     groups: dict[str, list[Sample]] = {}
     for s in pool:
-        groups.setdefault(group_key(s.image_path, group_regex), []).append(s)
+        groups.setdefault(group_key(s.image_path, group_regex, group_block), []).append(s)
     keys = sorted(groups)
     random.Random(seed).shuffle(keys)
 

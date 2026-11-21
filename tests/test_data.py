@@ -96,3 +96,11 @@ def test_fill_missing_splits_keeps_existing_splits():
     info = fill_missing_splits(samples, 0.2, 0.2, seed=0)
     assert info["val"] == 3          # untouched
     assert info["test"] == 3         # round(13 * 0.2) carved from train
+
+
+def test_group_block_buckets_consecutive_photo_numbers():
+    from src.data.merge import group_key
+    a = group_key(Path("IMG_3931_JPG_jpg.rf.ced9df65.jpg"), group_block=25)
+    b = group_key(Path("IMG_3949_JPG_jpg.rf.0679beb2.jpg"), group_block=25)
+    c = group_key(Path("IMG_3951_JPG_jpg.rf.f820fe18.jpg"), group_block=25)
+    assert a == b != c
