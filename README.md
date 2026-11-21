@@ -76,7 +76,7 @@ There is no dataset with distance labels for these objects, so the assumptions w
 | Focal length (±10 % → calibrated ±2 %) | ×/÷ 1.61 → 1.55 overall | small |
 | Camera mount (the 1080p data pools 18 city fleets) | horizon from 44 % to 64 % of image height | calibrate per robot |
 
-The pinhole and ground-plane estimates disagreed by 2× with the generic dashcam profile. A profile **fitted from the labels**, `roadwork_1080p` in [configs/camera.yaml](configs/camera.yaml), makes them agree on average. The reported uncertainty now uses the measured height spread (±40 %) instead of a guess (±25 %).
+The pinhole and ground-plane estimates disagreed by 2× with the generic dashcam profile. A profile **fitted from the labels**, `roadwork_1080p` in [configs/camera.yaml](configs/camera.yaml), brings the median pinhole/ground ratio on 1080p frames from 1.89 to 0.97. The share of detections where the two agree well enough to fuse rises from 20 % to 59 %. Objects nearer than about 9 m still fall back to pinhole, because the fitted horizon is an average over fleets and the bottom rows sit near the hood. The phone photos are a different camera (ratio 1.65). The reported uncertainty now uses the measured height spread (±40 %) instead of a guess (±25 %).
 
 A real robot needs `scripts/calibrate_camera.py` (focal length) plus `scripts/validate_distance.py` (cones at taped distances), which measures the end-to-end error directly.
 
