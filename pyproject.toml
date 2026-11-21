@@ -4,6 +4,34 @@ version = "0.1.0"
 description = "Cone / barrier / stop-sign detection with geometric distance estimation, optimised for edge devices"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
+dependencies = [
+    # Same pins as the "direct" section of requirements.txt; requirements.txt
+    # additionally pins every transitive package for an exact rebuild.
+    "ultralytics==8.4.216",
+    "torch==2.15.0",
+    "torchvision==0.29.2",
+    "onnx==1.23.2",
+    "onnxslim==0.1.99",
+    "onnxruntime-gpu==1.32.0",
+    "openvino==2026.4.1",
+    "nncf==3.4.0",
+    "nvidia-curand==10.4.5.25",
+    "opencv-python==5.1.0.95",
+    "numpy==2.4.6",
+    "pandas==3.1.1",
+    "matplotlib==3.11.2",
+    "PyYAML==6.0.3",
+    "tqdm==4.70.1",
+    "roboflow==1.7.3",
+    "pycocotools==2.0.11",
+]
+
+[dependency-groups]
+dev = ["pytest==9.2.0"]
+
+[tool.uv]
+# Scripts run as `python -m scripts.<name>` from the repo root; nothing to build/install.
+package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
