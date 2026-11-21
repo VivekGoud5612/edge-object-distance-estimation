@@ -63,3 +63,44 @@ def test_merge_prefixes_and_drops_empty(tmp_path):
     assert (out / "test_b.txt").exists()
     assert summary["dropped_empty"] == 1
     assert "names" in (out / "data.yaml").read_text()
+
+
+def test_original_stem_strips_roboflow_suffix():
+    from src.data.merge import original_stem
+    assert original_stem(Path("pittsburgh_0042_jpg.rf.3fa9c1d2.jpg")) == "pittsburgh_0042"
+    assert original_stem(Path("plain_name.jpg")) == "plain_name"
+
+
+def test_fill_missing_splits_moves_whole_groups():
+    from src.data.merge import fill_missing_splits, group_key
+    # 20 sequences x 5 frames, plus a Roboflow-augmented copy of each frame
+    samples = []
+    for seq in range(20):
+        for frame in range(5):
+            for aug in ("aaaa", "bbbb"):
+                p = Path(f"seq{seq:02d}_{frame:03d}_jpg.rf.{aug}.jpg")
+                samples.append(Sample("rw", "train", p, [YoloBox(0, .5, .5, .1, .1)]))
+    info = fill_missing_splits(samples, 0.1, 0.1, seed=0, group_regex=r"^(seq\d+)_\d+$")
+    assert info["groups"] == 20 and info["val"] == 20 and info["test"] == 20 and info["train"] == 160
+    # no sequence appears in two splits
+    split_of = {}
+    for s in samples:
+        k = group_key(s.image_path, r"^(seq\d+)_\d+$")
+        assert split_of.setdefault(k, s.split) == s.split
+
+
+def test_fill_missing_splits_keeps_existing_splits():
+    from src.data.merge import fill_missing_splits
+    samples = [Sample("x", "train", Path(f"t{i}.jpg"), []) for i in range(10)]
+    samples += [Sample("x", "val", Path(f"v{i}.jpg"), []) for i in range(3)]
+    info = fill_missing_splits(samples, 0.2, 0.2, seed=0)
+    assert info["val"] == 3          # untouched
+    assert info["test"] == 3         # round(13 * 0.2) carved from train
+
+
+def test_group_block_buckets_consecutive_photo_numbers():
+    from src.data.merge import group_key
+    a = group_key(Path("IMG_3931_JPG_jpg.rf.ced9df65.jpg"), group_block=25)
+    b = group_key(Path("IMG_3949_JPG_jpg.rf.0679beb2.jpg"), group_block=25)
+    c = group_key(Path("IMG_3951_JPG_jpg.rf.f820fe18.jpg"), group_block=25)
+    assert a == b != c

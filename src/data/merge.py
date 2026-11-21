@@ -22,6 +22,8 @@ Design choices
 from __future__ import annotations
 
 import os
+import random
+import re
 import shutil
 from collections import Counter
 from dataclasses import dataclass
@@ -109,9 +111,75 @@ def _write_stats_csv(path: Path, counts: Counter, image_counts: Counter) -> None
 
 def split_by_fraction(items: list, val_fraction: float, seed: int) -> tuple[list, list]:
     """Deterministic shuffle-split (for sources that only have one split)."""
-    import random
-
     items = list(items)
     random.Random(seed).shuffle(items)
     n_val = int(round(len(items) * val_fraction))
     return items[n_val:], items[:n_val]
+
+
+# --------------------------------------------------------------------------
+# Splitting sources that ship without val/test
+# --------------------------------------------------------------------------
+_RF_SUFFIX = re.compile(r"_(jpe?g|png|bmp|webp)\.rf\.[0-9a-f]+$", re.IGNORECASE)
+
+
+def original_stem(path: Path) -> str:
+    """Undo Roboflow's renaming: 'pittsburgh_0042_jpg.rf.3fa9c1.jpg' -> 'pittsburgh_0042'.
+
+    Roboflow augmentations produce several files from one original image, all
+    sharing this stem, so grouping by it keeps augmented copies together.
+    """
+    return _RF_SUFFIX.sub("", path.stem)
+
+
+def group_key(path: Path, group_regex: str | None = None, group_block: int | None = None) -> str:
+    r"""Images with the same key always land in the same split.
+
+    group_regex: first capture group becomes the key, e.g. r"^(.*)_\d+$" turns
+        'seqA_000123' into 'seqA' (one key per video sequence).
+    group_block: bucket by the LAST number in the name, e.g. with 25,
+        IMG_3931 .. IMG_3949 -> 'IMG_#157'. Phone photos taken in a burst have
+        consecutive numbers and near-identical content, so this keeps a burst
+        together instead of splitting it across train and test.
+    """
+    stem = original_stem(path)
+    if group_regex:
+        m = re.match(group_regex, stem)
+        if m:
+            stem = m.group(1)
+    if group_block:
+        m = re.search(r"(\d+)(?!.*\d)", stem)   # last run of digits
+        if m:
+            stem = f"{stem[:m.start()]}#{int(m.group(1)) // group_block}"
+    return stem
+
+
+def fill_missing_splits(samples: list[Sample], val_fraction: float, test_fraction: float,
+                        seed: int, group_regex: str | None = None,
+                        group_block: int | None = None) -> dict[str, int]:
+    """Give a source val/test splits if it has none, by moving GROUPS out of train.
+
+    Splits that already exist are left alone. Fractions are of the source's
+    total image count. Returns {"groups": n, "train": .., "val": .., "test": ..}.
+    Modifies the samples in place.
+    """
+    present = {s.split for s in samples}
+    wanted = [(sp, f) for sp, f in (("test", test_fraction), ("val", val_fraction))
+              if sp not in present and f > 0]
+    pool = [s for s in samples if s.split == "train"]
+    groups: dict[str, list[Sample]] = {}
+    for s in pool:
+        groups.setdefault(group_key(s.image_path, group_regex, group_block), []).append(s)
+    keys = sorted(groups)
+    random.Random(seed).shuffle(keys)
+
+    total = len(samples)
+    for split, frac in wanted:
+        target = int(round(total * frac))
+        moved = 0
+        while keys and moved < target:
+            for s in groups[keys.pop()]:
+                s.split = split
+                moved += 1
+    counts = {sp: sum(1 for s in samples if s.split == sp) for sp in SPLITS}
+    return {"groups": len(groups), **counts}
