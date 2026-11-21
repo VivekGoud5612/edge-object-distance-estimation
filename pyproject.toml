@@ -2,7 +2,7 @@
 name = "edge-object-distance-estimation"
 version = "0.1.0"
 description = "Cone / barrier / stop-sign detection with geometric distance estimation, optimised for edge devices"
-requires-python = ">=3.10"
+requires-python = ">=3.14,<3.15"   # the only version these pins were tested on
 license = { file = "LICENSE" }
 dependencies = [
     # Same pins as the "direct" section of requirements.txt; requirements.txt
@@ -32,6 +32,9 @@ dev = ["pytest==9.2.0"]
 [tool.uv]
 # Scripts run as `python -m scripts.<name>` from the repo root; nothing to build/install.
 package = false
+# The pins were taken from the tested machine (Ubuntu, Python 3.14). onnxruntime-gpu
+# and nvidia-curand only ship Linux wheels, so only resolve for Linux.
+environments = ["sys_platform == 'linux'"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
