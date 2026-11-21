@@ -39,7 +39,8 @@ def test_ground_fit_recovers_geometry():
     e = fit["estimates"]
     assert e["slope_H_over_hcam"].value == pytest.approx(0.7 / 1.3, rel=0.03)
     assert e["horizon_y0_norm"].value == pytest.approx(0.5, abs=0.01)
-    assert abs(e["curvature"].value) < 4 * e["curvature"].se + 0.05
+    assert e["exponent_k"].value == pytest.approx(1.0, abs=4 * e["exponent_k"].se + 0.02)
+    assert len(fit["scatter_by_size"]) == 4
     assert e["resid_robust_std"].value == pytest.approx(0.08, abs=0.02)
     assert e["slope_H_over_hcam"].se > 0
 
@@ -78,3 +79,20 @@ def test_monte_carlo_height_spread_propagates():
 def test_robust_std():
     x = np.random.default_rng(0).normal(0, 2, 10_000)
     assert robust_std(x) == pytest.approx(2, rel=0.05)
+
+
+def test_ground_fit_flags_wrong_exponent():
+    df = synthetic_cones()
+    # Bend the data: h proportional to (y - y0)^0.8 instead of ^1.
+    y0 = 360.0
+    df = df.assign(h=lambda d: d.h * ((d.y2 - y0) / 360.0) ** -0.2)
+    df = df.assign(y1=lambda d: d.y2 - d.h)
+    k = ground_line_fit(df, n_boot=30)["estimates"]["exponent_k"]
+    lo, hi = k.ci95()
+    assert hi < 1.0
+
+
+def test_mc_log_metrics():
+    b = monte_carlo_error([10.0], 0.7, 0.2, 1000, 0.0, None, n=20000)
+    assert b.log_sd.iloc[0] == pytest.approx(0.2, abs=0.01)
+    assert b.factor_68.iloc[0] == pytest.approx(np.exp(0.2), abs=0.02)

@@ -38,13 +38,16 @@ def _plots(out: Path, fits: dict, noise: pd.DataFrame, budgets: dict[str, pd.Dat
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    for cls, fit in fits.items():
+    for key, fit in fits.items():
+        cls, tag = key, key.replace(" @ ", "_")
         d, e = fit["data"], fit["estimates"]
-        a, y0 = e["slope_H_over_hcam"].value, e["horizon_y0_norm"].value
+        a, y0, k = e["slope_H_over_hcam"].value, e["horizon_y0_norm"].value, e["exponent_k"].value
         fig, ax = plt.subplots(figsize=(6, 4.5))
         ax.hexbin(d.yn, d.hn, gridsize=60, bins="log", cmap="viridis", mincnt=1)
         xs = np.linspace(max(y0, d.yn.min()), d.yn.max(), 50)
-        ax.plot(xs, a * (xs - y0), "r-", lw=2, label=f"h = {a:.3f}·(y − {y0:.3f})")
+        ax.plot(xs, a * (xs - y0), "r-", lw=2, label=f"k=1: h = {a:.3f}·(y − {y0:.3f})")
+        ax.plot(xs, a * (xs - y0) ** k * np.exp(np.median(np.log(d.hn) - np.log(a) - k * np.log(d.yn - y0))),
+                "m--", lw=1.5, label=f"free exponent k = {k:.2f}")
         ax.axvline(y0, color="r", ls=":", lw=1, label="fitted horizon")
         ax.axvline(0.5, color="w", ls="--", lw=1, label="image centre")
         ax.set_xlabel("bottom edge row / image height")
@@ -52,7 +55,7 @@ def _plots(out: Path, fits: dict, noise: pd.DataFrame, budgets: dict[str, pd.Dat
         ax.set_title(f"{cls}: flat-ground test ({fit['n_boxes']} boxes, {fit['n_images']} images)")
         ax.legend(fontsize=8)
         fig.tight_layout()
-        fig.savefig(out / f"ground_fit_{cls}.png", dpi=150)
+        fig.savefig(out / f"ground_fit_{tag}.png", dpi=150)
         plt.close(fig)
 
         # Residuals binned by row: flat-ground model predicts mean 0 everywhere.
@@ -66,7 +69,7 @@ def _plots(out: Path, fits: dict, noise: pd.DataFrame, budgets: dict[str, pd.Dat
         ax.set_ylabel("median log(h / h_line)")
         ax.set_title(f"{cls}: residuals by image row (0 = model holds)")
         fig.tight_layout()
-        fig.savefig(out / f"residuals_{cls}.png", dpi=150)
+        fig.savefig(out / f"residuals_{tag}.png", dpi=150)
         plt.close(fig)
 
     if not noise.empty:
@@ -110,6 +113,8 @@ def main() -> None:
     ap.add_argument("--device", default="0")
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--n-boot", type=int, default=200)
+    ap.add_argument("--min-res-images", type=int, default=200,
+                    help="fit a resolution separately only if it has at least this many images")
     ap.add_argument("--max-images", type=int, default=None)
     ap.add_argument("--out", default="results/distance_analysis")
     args = ap.parse_args()
@@ -147,22 +152,38 @@ def main() -> None:
     report.append("## A1 + A2. Flat ground, horizon and object-height variability\n")
     report.append("Model: `box_height = (H / h_cam) · (bottom_row − horizon_row)` for objects standing on "
                   "flat ground. Focal length and distance cancel, so this needs no distance labels.\n")
+    report.append("Fitted in log space, `log h = log a + k·log(y − y0)`, with boxes weighted by "
+                  "1/variance of their size quartile. Flat ground + pinhole says **k = 1**. Each image "
+                  "resolution is fitted separately because different resolutions are different cameras "
+                  "(different height and horizon); the pooled fit is shown only to show why mixing is wrong.\n")
     fits = {}
     f_norm = cfg.camera.intrinsics.fy / cfg.camera.intrinsics.height
     fit_rows = []
+    gt["res"] = gt.img_w.astype(int).astype(str) + "x" + gt.img_h.astype(int).astype(str)
+    big_res = gt.groupby("res").image.nunique()
+    big_res = big_res[big_res >= args.min_res_images].sort_values(ascending=False).index.tolist()
+    groups = [(r, gt[gt.res == r]) for r in big_res] + [("pooled", gt)]
+    main_res = big_res[0] if big_res else "pooled"
     for cls in ("cone", "barrier"):
         prior = cfg.objects[NAME_TO_ID[cls]]
-        try:
-            fit = ground_line_fit(gt, cls, n_boot=args.n_boot)
-        except ValueError as e:
-            report.append(f"### {cls}\nSkipped: {e}\n")
-            continue
-        fits[cls] = fit
-        report.append(f"### {cls} ({fit['n_boxes']} boxes, {fit['n_images']} images)\n")
-        report += [f"- {line}" for line in interpret_ground_fit(fit, prior.height_m, f_norm)]
-        report.append(f"\n![{cls}](ground_fit_{cls}.png) ![{cls} residuals](residuals_{cls}.png)\n")
-        fit_rows.append({"class": cls, **{k: v.value for k, v in fit["estimates"].items()},
-                         **{f"{k}_se": v.se for k, v in fit["estimates"].items()}})
+        for res, sub in groups:
+            key = f"{cls} @ {res}"
+            try:
+                fit = ground_line_fit(sub, cls, n_boot=args.n_boot)
+            except ValueError as e:
+                report.append(f"### {key}\nSkipped: {e}\n")
+                continue
+            fits[key] = fit
+            report.append(f"### {key} ({fit['n_boxes']} boxes, {fit['n_images']} images)\n")
+            report += [f"- {line}" for line in interpret_ground_fit(fit, prior.height_m, f_norm)]
+            report.append("\nScatter by box height (heteroscedasticity; equal values = constant "
+                          "relative noise):\n")
+            report.append(to_markdown(fit["scatter_by_size"]))
+            tag = key.replace(" @ ", "_")
+            report.append(f"\n![{key}](ground_fit_{tag}.png) ![{key} residuals](residuals_{tag}.png)\n")
+            fit_rows.append({"class": cls, "resolution": res, "n_boxes": fit["n_boxes"],
+                             **{k: v.value for k, v in fit["estimates"].items()},
+                             **{f"{k}_se": v.se for k, v in fit["estimates"].items()}})
     if fit_rows:
         save_table(pd.DataFrame(fit_rows), out / "ground_fit")
 
@@ -197,15 +218,20 @@ def main() -> None:
         "config priors": monte_carlo_error(DISTANCES, prior.height_m, prior.height_rel_uncertainty, f0,
                                            cfg.camera.focal_rel_uncertainty, box_err, box_h),
     }
-    if "cone" in fits:
-        sd = fits["cone"]["estimates"]["resid_robust_std"].value
+    main_key = f"cone @ {main_res}"
+    if main_key in fits:
+        # Scatter from the main camera only: the pooled scatter mixes two cameras.
+        sd = fits[main_key]["estimates"]["resid_robust_std"].value
         budgets["measured height spread"] = monte_carlo_error(
             DISTANCES, prior.height_m, sd, f0, cfg.camera.focal_rel_uncertainty, box_err, box_h)
         budgets["calibrated camera"] = monte_carlo_error(
             DISTANCES, prior.height_m, sd, f0, 0.02, box_err, box_h)
     report.append("## Combined error budget (cone, Monte Carlo, 20k draws per distance)\n")
     report.append("Error = estimated / true distance − 1. Sources: real cone height varies, focal length "
-                  "uncertain, detector box error resampled from A3 (if run).\n")
+                  "uncertain, detector box error resampled from A3 (if run). Height spread taken from "
+                  f"`{main_key}`. Because errors are multiplicative, read **factor_68** "
+                  "(68 % of estimates within ×/÷ this factor) rather than RMSE, which is skewed by the "
+                  "long 'too far' tail.\n")
     for name, b in budgets.items():
         report.append(f"### {name}\n")
         report.append(to_markdown(b))

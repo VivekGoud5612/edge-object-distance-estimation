@@ -26,11 +26,13 @@ Divide one by the other and both f and Z cancel:
     h = (H / h_cam) * (y_bottom - y0)
 
 So across thousands of cones, box height must be a STRAIGHT LINE in the
-bottom-edge row, through the horizon y0. We fit that line robustly:
+bottom-edge row, through the horizon y0. We fit it in log space,
+log h = log a + k·log(y - y0), robustly and with size-dependent weights:
   * slope a = H / h_cam      -> implied camera height for a 0.70 m cone
-  * intercept -> horizon row y0 -> camera pitch (if y0 != image centre)
-  * curvature (quadratic term) -> is the ground really flat / camera level?
-  * residual spread -> how much real cone heights (+ label noise) vary
+  * horizon row y0           -> camera pitch (if y0 != image centre)
+  * exponent k (should be 1) -> specification test: is the model right?
+  * residual spread, per box size -> how much real heights (+ label noise) vary
+Each camera (image resolution) must be fitted separately.
 This test is independent of the focal length AND of vertical image
 stretching (both h and y scale by the same factor), which matters because
 we don't know the camera that took ROADWork's photos.
@@ -201,13 +203,55 @@ def _with_se(point: dict[str, float], boots: pd.DataFrame) -> dict[str, Estimate
 # --------------------------------------------------------------------------
 
 
+def _wmad(r: np.ndarray, w: np.ndarray) -> float:
+    """Weighted mean absolute deviation from the weighted median (robust spread)."""
+    order = np.argsort(r)
+    cw = np.cumsum(w[order])
+    med = r[order][np.searchsorted(cw, cw[-1] / 2)]
+    return float(np.sum(w * np.abs(r - med)) / np.sum(w)), float(med)
+
+
+def _fit_log_line(yn: np.ndarray, hn: np.ndarray, w: np.ndarray) -> tuple[float, float]:
+    """Find (log a, y0) for  log h = log a + log(y - y0)  by 1-D search over y0.
+
+    For a fixed horizon y0 the model is linear with slope exactly 1 in log
+    space, so log a is just the (weighted) median offset. We choose the y0
+    that makes the residuals tightest (coarse grid, then a fine grid).
+    """
+    hi = float(np.quantile(yn, 0.01)) - 0.003
+    lo = max(0.0, hi - 0.6)
+    log_h = np.log(hn)
+    best = (np.inf, np.nan, np.nan)
+    for grid in (np.linspace(lo, hi, 40), None):
+        if grid is None:   # refine around the coarse optimum
+            step = (hi - lo) / 39
+            grid = np.linspace(max(lo, best[2] - step), min(hi, best[2] + step), 40)
+        for y0 in grid:
+            r = log_h - np.log(yn - y0)
+            spread, med = _wmad(r, w)
+            if spread < best[0]:
+                best = (spread, med, y0)
+    return best[1], best[2]
+
+
 def ground_line_fit(df: pd.DataFrame, cls: str = "cone", min_h_px: float = 10,
                     border_px: float = 2, n_boot: int = 200) -> dict:
     """Fit  h = a * (y_bottom - y0)  on labelled boxes of one on-ground class.
 
-    Works in coordinates normalised by image height, so photos of different
-    resolutions can be pooled. Returns point estimates with bootstrap SEs,
-    the filtered data (for plots) and a plain-language verdict per test.
+    Done in LOG space:  log h = log a + log(y - y0).
+      * Distance errors are multiplicative (a box 10 % too tall gives a
+        distance 10 % too short at any range), so log residuals are the
+        natural, symmetric scale; in linear space far/small boxes would be
+        ignored and near/big ones dominate.
+      * The scatter is larger for small boxes (a few pixels of label error
+        is a big fraction of a 15 px box). We measure the scatter per
+        box-size quartile and weight each box by 1/variance (two passes).
+      * Specification test: free the exponent, log h = log a + k·log(y - y0).
+        Flat ground + pinhole says k = 1 exactly; k != 1 means the model bends.
+
+    Coordinates are normalised by image height. Pool only images from ONE
+    camera: different cameras have different heights and horizons (the
+    script fits each image resolution separately for this reason).
     """
     d = df[(df.cls == cls) & (df.h >= min_h_px) & (df.y2 < df.img_h - border_px)
            & (df.y1 > border_px)].copy()
@@ -215,41 +259,48 @@ def ground_line_fit(df: pd.DataFrame, cls: str = "cone", min_h_px: float = 10,
     d["yn"] = d.y2 / d.img_h         # bottom row  / image height
     if len(d) < 30:
         raise ValueError(f"only {len(d)} usable {cls} boxes")
+    d["size_q"] = pd.qcut(d.h, 4, labels=False, duplicates="drop")
 
-    def stat(s: pd.DataFrame) -> dict[str, float]:
-        X = np.column_stack([s.yn, np.ones(len(s))])
-        a, b = huber_fit(X, s.hn.to_numpy())
-        y0 = -b / a
-        # Quadratic term in (y - y0): non-zero means the h-vs-y relation bends,
-        # i.e. the ground isn't flat in the camera frame (slope/crest, or lens distortion).
-        Xq = np.column_stack([(s.yn - y0) ** 2, s.yn - y0])
-        c2, _ = huber_fit(Xq, s.hn.to_numpy())
-        ratio = s.hn / (a * (s.yn - y0))           # 1.0 = perfectly on the line
-        ok = (s.yn - y0) > 0.02
-        return {"slope_H_over_hcam": a, "horizon_y0_norm": y0, "curvature": c2,
-                "resid_robust_std": robust_std(np.log(ratio[ok])),
-                "frac_above_horizon": float(((s.yn - y0) <= 0).mean())}
+    def stat(s: pd.DataFrame, with_tables: bool = False):
+        yn, hn = s.yn.to_numpy(), s.hn.to_numpy()
+        w = np.ones(len(s))
+        for _ in range(2):   # pass 1 unweighted, pass 2 weighted by 1/var(size quartile)
+            loga, y0 = _fit_log_line(yn, hn, w)
+            r = np.log(hn) - loga - np.log(np.clip(yn - y0, 1e-6, None))
+            sd_q = pd.Series(r).groupby(s.size_q.to_numpy()).apply(robust_std)
+            w = 1.0 / np.maximum(sd_q.reindex(s.size_q.to_numpy()).to_numpy(), 1e-3) ** 2
+        x = np.log(np.clip(yn - y0, 1e-6, None))
+        k, _ = huber_fit(np.column_stack([x, np.ones(len(s))]), np.log(hn))
+        out = {"slope_H_over_hcam": float(np.exp(loga)), "horizon_y0_norm": float(y0),
+               "exponent_k": float(k), "resid_robust_std": robust_std(r)}
+        if with_tables:
+            return out, r, sd_q
+        return out
 
-    point = stat(d)
+    point, resid, sd_by_size = stat(d, with_tables=True)
     boots = cluster_bootstrap(d, stat, n_boot=n_boot)
     est = _with_se(point, boots)
 
-    y0 = point["horizon_y0_norm"]
-    d["pred_hn"] = point["slope_H_over_hcam"] * (d.yn - y0)
-    d["log_ratio"] = np.log(d.hn / d.pred_hn.where(d.pred_hn > 0))
-    return {"n_boxes": len(d), "n_images": d.image.nunique(), "estimates": est, "data": d}
+    d["log_ratio"] = resid
+    size_edges = d.groupby("size_q").h.agg(["min", "max", "count"])
+    hetero = pd.DataFrame({"box_h_px": [f"{a:.0f}–{b:.0f}" for a, b in zip(size_edges["min"], size_edges["max"])],
+                           "n": size_edges["count"].to_numpy(),
+                           "log_scatter": sd_by_size.reindex(size_edges.index).to_numpy()})
+    return {"n_boxes": len(d), "n_images": d.image.nunique(), "estimates": est, "data": d,
+            "scatter_by_size": hetero}
 
 
 def interpret_ground_fit(fit: dict, object_height_m: float, focal_px_norm: float | None = None) -> list[str]:
     """Turn the fit into plain-language findings (used in the report)."""
     e = fit["estimates"]
-    a, y0, c2, sd = (e["slope_H_over_hcam"], e["horizon_y0_norm"], e["curvature"],
-                     e["resid_robust_std"])
+    a, y0, k, sd = (e["slope_H_over_hcam"], e["horizon_y0_norm"], e["exponent_k"],
+                    e["resid_robust_std"])
     lines = []
     h_cam = object_height_m / a.value
     h_cam_se = h_cam * a.se / a.value
-    lines.append(f"Implied camera height for a {object_height_m:.2f} m object: "
-                 f"{h_cam:.2f} ± {h_cam_se:.2f} m (from slope H/h_cam = {a}).")
+    lines.append(f"Slope H/h_cam = {a}. For a {object_height_m:.2f} m object that implies a camera "
+                 f"{h_cam:.2f} ± {h_cam_se:.2f} m above the road. Only the RATIO is identifiable: "
+                 "the same slope fits a lower camera with smaller objects.")
     lo, hi = y0.ci95()
     centre_in = lo <= 0.5 <= hi
     lines.append(f"Horizon at {y0.value * 100:.1f}% of image height (95% CI {lo * 100:.1f}–{hi * 100:.1f}%). "
@@ -260,16 +311,16 @@ def interpret_ground_fit(fit: dict, object_height_m: float, focal_px_norm: float
         pitch = np.degrees(np.arctan((0.5 - y0.value) / focal_px_norm))
         lines.append(f"  -> implied pitch ≈ {pitch:+.1f}° (positive = tilted down) for f = "
                      f"{focal_px_norm:.2f} × image height.")
-    c_lo, c_hi = c2.ci95()
-    flat = c_lo <= 0 <= c_hi
-    lines.append(f"Curvature term {c2} (95% CI {c_lo:.3g} to {c_hi:.3g}): "
-                 + ("no significant bending, the flat-ground model holds on average."
-                    if flat else "significant bending: ground is not flat in the camera frame "
-                    "on average (hills/crests, mounting tilt or lens distortion)."))
-    lines.append(f"Scatter around the line: robust std of log(h / h_line) = {sd} "
-                 f"(≈ {100 * sd.value:.0f}% per box). This bounds the combined variability of "
-                 "real object height, road slope and label noise. It is the irreducible error "
-                 "of a single-box distance estimate for this class.")
+    k_lo, k_hi = k.ci95()
+    lines.append(f"Exponent k = {k} (95% CI {k_lo:.3f}–{k_hi:.3f}; flat ground + pinhole predicts exactly 1). "
+                 + ("Consistent with the model."
+                    if k_lo <= 1 <= k_hi else
+                    "Significantly different from 1, so the straight-line model is misspecified. Likely "
+                    "causes: far objects are only labelled when unusually large (selection bias, pushes k "
+                    "down), road slope/crests, lens distortion, or several object sizes mixed in one class."))
+    lines.append(f"Scatter: robust std of log residual = {sd} (≈ ×/÷ {np.exp(sd.value):.2f} per box). "
+                 "This is the combined variability of real object height, road slope and label noise, "
+                 "i.e. the error floor of a single-box pinhole distance for this class.")
     return lines
 
 
@@ -356,7 +407,8 @@ def monte_carlo_error(distances_m: list[float], object_height_m: float, height_r
       detected height     h_i * (1 + e), e resampled from the MEASURED detector errors
                           of boxes of similar pixel size (empirical, not Gaussian)
       estimate            Z_hat = f0 * H0 / detected height
-    Reports median bias, 5th/95th percentile and RMSE of Z_hat/Z - 1.
+    Reports median bias, 5th/95th percentile and RMSE of Z_hat/Z - 1, plus the
+    same in log space (log_bias, log_sd, factor_68 = exp(log_sd)).
     """
     rng = np.random.default_rng(seed)
     rows = []
@@ -380,5 +432,11 @@ def monte_carlo_error(distances_m: list[float], object_height_m: float, height_r
         rows.append({"true_m": Z, "box_h_px": focal_px * object_height_m / Z,
                      "median_bias": float(np.median(rel)), "p05": float(np.percentile(rel, 5)),
                      "p95": float(np.percentile(rel, 95)), "rmse": float(np.sqrt(np.mean(rel ** 2))),
-                     "abs_err_p95_m": float(np.percentile(np.abs(rel), 95) * Z)})
+                     "abs_err_p95_m": float(np.percentile(np.abs(rel), 95) * Z),
+                     # Log-space summary: errors are multiplicative, so the honest single
+                     # number is a geometric factor. log_sd = 0.3 means "within ×/÷ 1.35
+                     # about 68 % of the time"; it treats 2× too far and 2× too near alike.
+                     "log_bias": float(np.median(np.log1p(rel))),
+                     "log_sd": robust_std(np.log1p(rel)),
+                     "factor_68": float(np.exp(robust_std(np.log1p(rel))))})
     return pd.DataFrame(rows)
