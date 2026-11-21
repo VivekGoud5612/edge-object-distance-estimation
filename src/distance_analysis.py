@@ -203,6 +203,22 @@ def _with_se(point: dict[str, float], boots: pd.DataFrame) -> dict[str, Estimate
 # --------------------------------------------------------------------------
 
 
+def camera_group(image_name: str) -> str:
+    """Best guess at which vehicle/camera took an image, from its file name.
+
+    ROADWork stems look like  roadwork__<city>_<32-hex sequence id>_<frame>...
+    (dash-cam videos, one fleet per city) or roadwork__IMG_1234... (phone
+    photos). Same city ~ same fleet/mount; that is the finest grouping with
+    enough boxes per group for a stable fit.
+    """
+    import re
+    stem = Path(image_name).stem.split("__", 1)[-1]
+    m = re.match(r"(.+?)_[0-9a-f]{32}", stem)
+    if m:
+        return m.group(1)
+    return "phone" if stem.upper().startswith("IMG") else "other"
+
+
 def _wmad(r: np.ndarray, w: np.ndarray) -> float:
     """Weighted mean absolute deviation from the weighted median (robust spread)."""
     order = np.argsort(r)
@@ -212,8 +228,13 @@ def _wmad(r: np.ndarray, w: np.ndarray) -> float:
 
 
 def _y0_grid(yn: np.ndarray) -> tuple[float, float]:
-    """Search range for the horizon: from 0.6 above the highest box bottom to just above it."""
-    hi = float(np.quantile(yn, 0.01)) - 0.003
+    """Search range for the horizon.
+
+    Top end: the 5th percentile of box bottoms, so up to 5 % of boxes (bad
+    labels, objects on rising road) may sit above the horizon (they get zero
+    weight) without dragging the horizon up to them.
+    """
+    hi = float(np.quantile(yn, 0.05)) - 0.003
     return max(0.0, hi - 0.6), hi
 
 
@@ -236,15 +257,20 @@ def _fit_log_line(yn: np.ndarray, hn: np.ndarray, w: np.ndarray,
         else:
             grid = np.linspace(lo, hi, 40)
         for y0 in grid:
-            x = np.log(yn - y0)
+            # A few boxes (bad labels, objects on a rising road) can sit ABOVE a
+            # candidate horizon; log() of a negative gap is NaN. Give them zero
+            # weight for this candidate instead of letting NaN poison the fit.
+            ok = yn - y0 > 1e-4
+            wk = np.where(ok, w, 0.0)
+            x = np.log(np.where(ok, yn - y0, 1.0))
             if free_k:
-                sw = np.sqrt(w)
+                sw = np.sqrt(wk)
                 k, loga = np.linalg.lstsq(np.column_stack([x, np.ones_like(x)]) * sw[:, None],
                                           log_h * sw, rcond=None)[0]
             else:
                 k, loga = 1.0, 0.0
             r = log_h - loga - k * x
-            spread, med = _wmad(r, w)
+            spread, med = _wmad(r, wk)
             if spread < best[0]:
                 best = (spread, loga + med, k, y0)
     return best[1], best[2], best[3]

@@ -96,3 +96,19 @@ def test_mc_log_metrics():
     b = monte_carlo_error([10.0], 0.7, 0.2, 1000, 0.0, None, n=20000)
     assert b.log_sd.iloc[0] == pytest.approx(0.2, abs=0.01)
     assert b.factor_68.iloc[0] == pytest.approx(np.exp(0.2), abs=0.02)
+
+
+def test_ground_fit_survives_boxes_above_horizon():
+    df = synthetic_cones()
+    # A few mislabelled boxes far above the horizon must not break the fit.
+    bad = df.head(12).assign(y2=100.0, y1=80.0, h=20.0)
+    fit = ground_line_fit(pd.concat([df, bad], ignore_index=True), n_boot=10)
+    e = fit["estimates"]
+    assert np.isfinite(e["exponent_k"].value)
+    assert e["horizon_y0_norm"].value == pytest.approx(0.5, abs=0.02)
+
+
+def test_camera_group_from_name():
+    from src.distance_analysis import camera_group
+    assert camera_group("roadwork__los_angeles_" + "a" * 32 + "_000000_1_jpg.rf.x.jpg") == "los_angeles"
+    assert camera_group("roadwork__IMG_3949_JPG_jpg.rf.0679.jpg") == "phone"

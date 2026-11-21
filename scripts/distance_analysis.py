@@ -26,7 +26,8 @@ import pandas as pd
 
 from src.classes import NAME_TO_ID
 from src.config import REPO_ROOT, load_distance_config
-from src.distance_analysis import (aspect_check, box_height_noise, collect_boxes, ground_line_fit,
+from src.distance_analysis import (aspect_check, box_height_noise, camera_group, collect_boxes,
+                                   ground_line_fit,
                                    image_shapes, interpret_ground_fit, monte_carlo_error)
 from src.reporting import save_table, to_markdown
 
@@ -113,6 +114,8 @@ def main() -> None:
     ap.add_argument("--device", default="0")
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--n-boot", type=int, default=200)
+    ap.add_argument("--min-city-images", type=int, default=60,
+                    help="fit a city (camera fleet) separately if it has at least this many images")
     ap.add_argument("--min-res-images", type=int, default=200,
                     help="fit a resolution separately only if it has at least this many images")
     ap.add_argument("--max-images", type=int, default=None)
@@ -188,6 +191,41 @@ def main() -> None:
                              **{f"{k}_se": v.se for k, v in fit["estimates"].items()}})
     if fit_rows:
         save_table(pd.DataFrame(fit_rows), out / "ground_fit")
+
+    # ---- A1b: one fit per city (proxy for vehicle / camera mount) ----
+    gt["group"] = gt.image.map(camera_group)
+    main_gt = gt[gt.res == main_res] if main_res != "pooled" else gt
+    city_counts = main_gt.groupby("group").image.nunique()
+    cities = city_counts[city_counts >= args.min_city_images].sort_values(ascending=False).index
+    city_rows = []
+    print(f"      per-city fits on {main_res}: {len(cities)} groups")
+    for city in cities:
+        try:
+            f = ground_line_fit(main_gt[main_gt.group == city], "cone", n_boot=max(50, args.n_boot // 2))
+        except ValueError:
+            continue
+        e = f["estimates"]
+        qs = [k for k in e if k.startswith("resid_median_q")]
+        city_rows.append({
+            "city": city, "images": f["n_images"], "boxes": f["n_boxes"],
+            "H_over_hcam": round(e["slope_H_over_hcam"].value, 4),
+            "H_over_hcam_se": round(e["slope_H_over_hcam"].se, 4),
+            "horizon_pct": round(100 * e["horizon_y0_norm"].value, 1),
+            "horizon_se_pct": round(100 * e["horizon_y0_norm"].se, 1),
+            "k_free": round(e["exponent_k"].value, 2), "k_se": round(e["exponent_k"].se, 2),
+            "worst_band_resid": round(max((e[q].value for q in qs), key=abs), 3),
+            "bands_off_2se": sum(abs(e[q].value) > 2 * e[q].se and abs(e[q].value) > 0.03 for q in qs),
+            "scatter": round(e["resid_robust_std"].value, 3),
+            "degenerate": f["degenerate"]})
+    if city_rows:
+        cdf = pd.DataFrame(city_rows)
+        save_table(cdf, out / "ground_fit_by_city")
+        report.append(f"## A1b. Per-city cone fits ({main_res})\n")
+        report.append("Each city's dash-cam fleet is a different mount, so each gets its own slope and "
+                      "horizon. If the pooled misfit came from mixing mounts, the per-city fits should show "
+                      "k ≈ 1, few bands off, and smaller scatter than the pooled fit.\n")
+        report.append(to_markdown(cdf))
+        report.append("")
 
     # ---- A3: detector box-height noise ----
     noise = pd.DataFrame()
