@@ -311,7 +311,7 @@ def ground_line_fit(df: pd.DataFrame, cls: str = "cone", min_h_px: float = 10,
             sd_q = pd.Series(r).groupby(q).apply(robust_std)
             w = 1.0 / np.maximum(sd_q.reindex(q).to_numpy(), 1e-3) ** 2
         # Overall scatter vs. scatter around each quartile's own median: the gap is
-        # systematic misfit of the k = 1 curve, not real object-height variation.
+        # systematic misfit of the flat-ground curve, not real object-height variation.
         r_centred = r - pd.Series(r).groupby(q).transform("median").to_numpy()
         out = {"slope_H_over_hcam": float(np.exp(loga)), "horizon_y0_norm": float(y0),
                "resid_robust_std": robust_std(r), "resid_std_within_rowbin": robust_std(r_centred)}
@@ -372,16 +372,16 @@ def interpret_ground_fit(fit: dict, object_height_m: float, focal_px_norm: float
            and abs(e[kk].value) > 0.03]
     pattern = ", ".join(f"{e[kk].value:+.3f}±{e[kk].se:.3f}" for kk in qs)
     lines.append(f"Range-quartile test (near → far is q3 → q0): median residuals {pattern}. "
-                 + ("All within 2 SE (or < 3 %) of zero: the k = 1 curve fits every range band."
+                 + ("All within 2 SE (or < 3 %) of zero: the flat-ground curve fits every range band."
                     if not bad else f"{len(bad)} of {len(qs)} bands are off by more than 2 SE and 3 %: "
-                    "the k = 1 model is misspecified for this subset, independently of the k/horizon "
-                    "trade-off above."))
+                    "the flat-ground model is misspecified for this subset. A U pattern (+ − − +) "
+                    "is the signature of several cameras/horizons mixed together."))
     sw = e["resid_std_within_rowbin"]
     lines.append(f"Scatter: robust std of log residual = {sd} (≈ ×/÷ {np.exp(sd.value):.2f} per box). "
                  "This is the combined variability of real object height, road slope and label noise, "
                  "i.e. the error floor of a single-box pinhole distance for this class. "
                  f"Around each range-quartile's own median it is {sw.value:.3f}: the difference is "
-                 "systematic misfit of the k = 1 curve, which a better camera model would remove, so the "
+                 "systematic misfit of the flat-ground curve, which a better camera model would remove, so the "
                  "irreducible height spread is closer to the smaller number.")
     return lines
 
