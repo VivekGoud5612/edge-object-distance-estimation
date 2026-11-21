@@ -16,7 +16,7 @@ from pathlib import Path
 from src.classes import CLASS_NAMES
 from src.config import REPO_ROOT, load_yaml
 from src.data import coco, roboflow
-from src.data.merge import Sample, split_by_fraction, write_merged_dataset
+from src.data.merge import Sample, fill_missing_splits, split_by_fraction, write_merged_dataset
 from src.data.yolo_labels import (build_id_map, image_to_label_path, list_images,
                                   read_yolo_labels, remap_boxes)
 
@@ -31,7 +31,8 @@ def samples_from_yolo_dir(source: str, split: str, images_dir: Path,
     return out
 
 
-def prepare_roboflow(name: str, cfg: dict, raw_dir: Path, download: bool) -> list[Sample]:
+def prepare_roboflow(name: str, cfg: dict, raw_dir: Path, download: bool,
+                     split_cfg: dict, seed: int) -> list[Sample]:
     dest = raw_dir / name
     if download:
         roboflow.download_roboflow(cfg["workspace"], cfg["project"], int(cfg["version"]),
@@ -42,13 +43,19 @@ def prepare_roboflow(name: str, cfg: dict, raw_dir: Path, download: bool) -> lis
     samples = []
     for split, img_dir in roboflow.iter_roboflow_splits(dest):
         samples += samples_from_yolo_dir(name, split, img_dir, id_map)
-    if not any(s.split == "test" for s in samples):
-        # Some exports have no test split: carve one out of val.
-        val = [s for s in samples if s.split == "val"]
-        _, test = split_by_fraction(val, 0.5, seed=0)
-        for s in test:
-            s.split = "test"
+    _fill_splits(name, samples, cfg, split_cfg, seed)
     return samples
+
+
+def _fill_splits(name: str, samples: list[Sample], cfg: dict, split_cfg: dict, seed: int) -> None:
+    """Many Roboflow exports only have 'train'. Without this, the source would
+    have no test images at all, i.e. no way to measure cone/barrier accuracy."""
+    # Images that will be dropped anyway (none of our classes) shouldn't count.
+    kept = [s for s in samples if s.boxes]
+    info = fill_missing_splits(kept, float(split_cfg.get("val", 0.1)), float(split_cfg.get("test", 0.1)),
+                               seed, cfg.get("group_regex"))
+    print(f"[{name}] splits: train {info['train']}, val {info['val']}, test {info['test']} "
+          f"({info['groups']} groups; group_regex={cfg.get('group_regex')!r})")
 
 
 def prepare_coco(name: str, cfg: dict, raw_dir: Path, seed: int) -> list[Sample]:
@@ -78,7 +85,7 @@ def prepare_coco(name: str, cfg: dict, raw_dir: Path, seed: int) -> list[Sample]
     return samples
 
 
-def prepare_local(name: str, cfg: dict) -> list[Sample]:
+def prepare_local(name: str, cfg: dict, split_cfg: dict, seed: int) -> list[Sample]:
     root = REPO_ROOT / cfg["path"]
     id_map = build_id_map(cfg["names"], cfg["class_map"], CLASS_NAMES)
     _print_mapping(name, cfg["names"], id_map)
@@ -89,15 +96,9 @@ def prepare_local(name: str, cfg: dict) -> list[Sample]:
             if d.is_dir():
                 samples += samples_from_yolo_dir(name, split, d, id_map)
     else:
-        # Unsplit folder: 70/15/15 split.
-        all_s = samples_from_yolo_dir(name, "train", root / "images", id_map)
-        rest, test = split_by_fraction(all_s, 0.15, 0)
-        train, val = split_by_fraction(rest, 0.176, 0)   # 0.176 * 0.85 ~ 0.15
-        for s in val:
-            s.split = "val"
-        for s in test:
-            s.split = "test"
-        samples = train + val + test
+        # Unsplit folder: everything starts as train, then val/test are carved out by group.
+        samples = samples_from_yolo_dir(name, "train", root / "images", id_map)
+    _fill_splits(name, samples, cfg, split_cfg, seed)
     return samples
 
 
@@ -120,6 +121,7 @@ def main() -> None:
     raw_dir = REPO_ROOT / cfg["raw_dir"]
     out_dir = REPO_ROOT / cfg["output_dir"]
     seed = int(cfg.get("seed", 0))
+    split_cfg = cfg.get("split_missing", {"val": 0.1, "test": 0.1})
 
     samples: list[Sample] = []
     for name, src in cfg["sources"].items():
@@ -130,11 +132,11 @@ def main() -> None:
         kind = src["type"]
         print(f"\n=== {name} ({kind}) ===")
         if kind == "roboflow":
-            samples += prepare_roboflow(name, src, raw_dir, download=not args.skip_download)
+            samples += prepare_roboflow(name, src, raw_dir, not args.skip_download, split_cfg, seed)
         elif kind == "coco":
             samples += prepare_coco(name, src, raw_dir, seed)
         elif kind == "local_yolo":
-            samples += prepare_local(name, src)
+            samples += prepare_local(name, src, split_cfg, seed)
         else:
             raise ValueError(f"unknown source type {kind!r}")
 

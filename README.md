@@ -70,7 +70,7 @@ Batch 1, 200 test images, 20 warm-up runs, end-to-end latency (pre-processing, i
 - **Barrier:** a Jersey or concrete barrier, a water-filled barrier, or a barricade. Drums are excluded; including them is a one-line experiment in the config.
 - **Stop sign:** the octagonal sign plate only, without the pole.
 
-**Splits.** Each source's own train/val/test split is kept, to avoid leaking Roboflow's augmented copies into the test set. COCO train2017 is split 85/15 into our train and val, and COCO val2017 becomes our test set. `test_<source>.txt` gives a per-source test slice.
+**Splits.** Each source's own train/val/test split is kept, to avoid leaking Roboflow's augmented copies into the test set. ROADWork's export is train-only, so for sources like it, 10% val and 10% test are carved out of train in *groups*. A group is one original image together with its augmented copies, or one whole sequence when `group_regex` is set, so near-duplicate frames never end up in both train and test. COCO train2017 is split 85/15 into our train and val, and COCO val2017 becomes our test set. `test_<source>.txt` gives a per-source test slice.
 
 **Known label noise.** Unlabelled cones may appear in COCO images, and unlabelled stop signs in ROADWork images. Merging datasets that were labelled for different class sets always has this problem.
 

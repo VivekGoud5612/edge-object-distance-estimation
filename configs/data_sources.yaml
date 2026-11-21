@@ -12,6 +12,14 @@ output_dir: data/merged           # final merged YOLO dataset
 raw_dir: data/raw                 # downloads land here (git-ignored)
 seed: 0
 
+# Sources that ship without val/test (e.g. ROADWork's Roboflow export is
+# train-only) get these fractions carved out of train. Images are moved in
+# GROUPS (same original image, or same sequence via `group_regex` on a
+# source), so near-duplicates never end up in both train and test.
+split_missing:
+  val: 0.10
+  test: 0.10
+
 sources:
   # ROADWork work-zone images (CMU) as exported on Roboflow Universe.
   # https://universe.roboflow.com/roadworkwithdirectionalpanelsallobjects/roadwork_vpanels_all_objects
@@ -23,6 +31,7 @@ sources:
     project: roadwork_vpanels_all_objects
     version: 3                    # CHECK on the dataset page
     format: yolov8
+    group_regex: null             # set after looking at file names, e.g. "^(.*)_\\d+$" for <sequence>_<frame>
     class_map:
       cone: cone
       barrier: barrier
