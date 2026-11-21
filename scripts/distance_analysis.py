@@ -42,13 +42,11 @@ def _plots(out: Path, fits: dict, noise: pd.DataFrame, budgets: dict[str, pd.Dat
     for key, fit in fits.items():
         cls, tag = key, key.replace(" @ ", "_")
         d, e = fit["data"], fit["estimates"]
-        a, y0, k = e["slope_H_over_hcam"].value, e["horizon_y0_norm"].value, e["exponent_k"].value
+        a, y0 = e["slope_H_over_hcam"].value, e["horizon_y0_norm"].value
         fig, ax = plt.subplots(figsize=(6, 4.5))
         ax.hexbin(d.yn, d.hn, gridsize=60, bins="log", cmap="viridis", mincnt=1)
         xs = np.linspace(max(y0, d.yn.min()), d.yn.max(), 50)
-        ax.plot(xs, a * (xs - y0), "r-", lw=2, label=f"k=1: h = {a:.3f}·(y − {y0:.3f})")
-        ax.plot(xs, a * (xs - y0) ** k * np.exp(np.median(np.log(d.hn) - np.log(a) - k * np.log(d.yn - y0))),
-                "m--", lw=1.5, label=f"free exponent k = {k:.2f}")
+        ax.plot(xs, a * (xs - y0), "r-", lw=2, label=f"h = {a:.3f}·(y − {y0:.3f})")
         ax.axvline(y0, color="r", ls=":", lw=1, label="fitted horizon")
         ax.axvline(0.5, color="w", ls="--", lw=1, label="image centre")
         ax.set_xlabel("bottom edge row / image height")
@@ -155,8 +153,8 @@ def main() -> None:
     report.append("## A1 + A2. Flat ground, horizon and object-height variability\n")
     report.append("Model: `box_height = (H / h_cam) · (bottom_row − horizon_row)` for objects standing on "
                   "flat ground. Focal length and distance cancel, so this needs no distance labels.\n")
-    report.append("Fitted in log space, `log h = log a + k·log(y − y0)`, with boxes weighted by "
-                  "1/variance of their range quartile. Flat ground + pinhole says **k = 1**. Each image "
+    report.append("Fitted in log space, `log h = log a + log(y − y0)`, with boxes weighted by "
+                  "1/variance of their range quartile. The specification test is the median residual per range quartile: all ≈ 0 if the model holds. Each image "
                   "resolution is fitted separately because different resolutions are different cameras "
                   "(different height and horizon); the pooled fit is shown only to show why mixing is wrong.\n")
     fits = {}
@@ -212,7 +210,6 @@ def main() -> None:
             "H_over_hcam_se": round(e["slope_H_over_hcam"].se, 4),
             "horizon_pct": round(100 * e["horizon_y0_norm"].value, 1),
             "horizon_se_pct": round(100 * e["horizon_y0_norm"].se, 1),
-            "k_free": round(e["exponent_k"].value, 2), "k_se": round(e["exponent_k"].se, 2),
             "worst_band_resid": round(max((e[q].value for q in qs), key=abs), 3),
             "bands_off_2se": sum(abs(e[q].value) > 2 * e[q].se and abs(e[q].value) > 0.03 for q in qs),
             "scatter": round(e["resid_robust_std"].value, 3),
@@ -223,7 +220,7 @@ def main() -> None:
         report.append(f"## A1b. Per-city cone fits ({main_res})\n")
         report.append("Each city's dash-cam fleet is a different mount, so each gets its own slope and "
                       "horizon. If the pooled misfit came from mixing mounts, the per-city fits should show "
-                      "k ≈ 1, few bands off, and smaller scatter than the pooled fit.\n")
+                      "few bands off and smaller scatter than the pooled fit.\n")
         report.append(to_markdown(cdf))
         report.append("")
 

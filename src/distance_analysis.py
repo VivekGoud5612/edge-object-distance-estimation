@@ -27,10 +27,10 @@ Divide one by the other and both f and Z cancel:
 
 So across thousands of cones, box height must be a STRAIGHT LINE in the
 bottom-edge row, through the horizon y0. We fit it in log space,
-log h = log a + k·log(y - y0), robustly and with size-dependent weights:
+log h = log a + log(y - y0), robustly and with size-dependent weights:
   * slope a = H / h_cam      -> implied camera height for a 0.70 m cone
   * horizon row y0           -> camera pitch (if y0 != image centre)
-  * exponent k (should be 1) -> specification test: is the model right?
+  * median residual per range band (all ~0) -> specification test
   * residual spread, per box size -> how much real heights (+ label noise) vary
 Each camera (image resolution) must be fitted separately.
 This test is independent of the focal length AND of vertical image
@@ -239,21 +239,20 @@ def _y0_grid(yn: np.ndarray) -> tuple[float, float]:
 
 
 def _fit_log_line(yn: np.ndarray, hn: np.ndarray, w: np.ndarray,
-                  free_k: bool = False) -> tuple[float, float, float]:
-    """Fit  log h = log a + k·log(y - y0)  by a 1-D search over the horizon y0.
+                  ) -> tuple[float, float]:
+    """Fit  log h = log a + log(y - y0)  by a 1-D search over the horizon y0.
 
-    free_k=False: k is fixed at 1 (the physical model), log a is the weighted
-    median offset. free_k=True: for each y0, (log a, k) by weighted least
-    squares. Either way y0 is chosen to make the residuals tightest (coarse
-    grid, then a fine grid). Returns (log a, k, y0).
+    For a fixed y0 the slope in log space is exactly 1, so log a is the
+    weighted median offset; y0 is chosen to make the residuals tightest
+    (coarse grid, then a fine grid). Returns (log a, y0).
     """
     lo, hi = _y0_grid(yn)
     log_h = np.log(hn)
-    best = (np.inf, np.nan, 1.0, np.nan)
+    best = (np.inf, np.nan, np.nan)
     for refine in (False, True):
         if refine:
             step = (hi - lo) / 39
-            grid = np.linspace(max(lo, best[3] - step), min(hi, best[3] + step), 40)
+            grid = np.linspace(max(lo, best[2] - step), min(hi, best[2] + step), 40)
         else:
             grid = np.linspace(lo, hi, 40)
         for y0 in grid:
@@ -263,17 +262,11 @@ def _fit_log_line(yn: np.ndarray, hn: np.ndarray, w: np.ndarray,
             ok = yn - y0 > 1e-4
             wk = np.where(ok, w, 0.0)
             x = np.log(np.where(ok, yn - y0, 1.0))
-            if free_k:
-                sw = np.sqrt(wk)
-                k, loga = np.linalg.lstsq(np.column_stack([x, np.ones_like(x)]) * sw[:, None],
-                                          log_h * sw, rcond=None)[0]
-            else:
-                k, loga = 1.0, 0.0
-            r = log_h - loga - k * x
+            r = log_h - x
             spread, med = _wmad(r, wk)
             if spread < best[0]:
-                best = (spread, loga + med, k, y0)
-    return best[1], best[2], best[3]
+                best = (spread, med, y0)
+    return best[1], best[2]
 
 
 def ground_line_fit(df: pd.DataFrame, cls: str = "cone", min_h_px: float = 10,
@@ -289,10 +282,11 @@ def ground_line_fit(df: pd.DataFrame, cls: str = "cone", min_h_px: float = 10,
         REGRESSOR (bottom row, i.e. range), never of box height: binning on
         the outcome would cut the residual distribution and fake a small
         within-bin scatter. Each box is weighted by 1/variance of its bin.
-      * Specification test: a second fit frees the exponent,
-        log h = log a + k·log(y - y0), with y0 re-fitted jointly. Flat ground +
-        pinhole says k = 1. k and y0 trade off against each other, so the
-        bootstrap correlation of (k, y0) is reported too.
+      * Specification test: with k = 1 and its best horizon, the median
+        residual must be ~0 in every range quartile. (A free exponent k was
+        tried and dropped: k and the horizon are almost perfectly confounded,
+        bootstrap corr ~ -1 even on perfect synthetic data, so the joint fit
+        just runs the horizon to the edge of its range and inflates k.)
       * A horizon at the edge of the search range is not an estimate: the
         fit is flagged degenerate.
 
@@ -312,16 +306,14 @@ def ground_line_fit(df: pd.DataFrame, cls: str = "cone", min_h_px: float = 10,
         yn, hn, q = s.yn.to_numpy(), s.hn.to_numpy(), s.row_q.to_numpy()
         w = np.ones(len(s))
         for _ in range(2):   # pass 1 unweighted, pass 2 weighted by 1/var(row quartile)
-            loga, _, y0 = _fit_log_line(yn, hn, w)
+            loga, y0 = _fit_log_line(yn, hn, w)
             r = np.log(hn) - loga - np.log(np.clip(yn - y0, 1e-6, None))
             sd_q = pd.Series(r).groupby(q).apply(robust_std)
             w = 1.0 / np.maximum(sd_q.reindex(q).to_numpy(), 1e-3) ** 2
-        _, k, y0_k = _fit_log_line(yn, hn, w, free_k=True)
         # Overall scatter vs. scatter around each quartile's own median: the gap is
         # systematic misfit of the k = 1 curve, not real object-height variation.
         r_centred = r - pd.Series(r).groupby(q).transform("median").to_numpy()
         out = {"slope_H_over_hcam": float(np.exp(loga)), "horizon_y0_norm": float(y0),
-               "exponent_k": float(k), "horizon_y0_free_k": float(y0_k),
                "resid_robust_std": robust_std(r), "resid_std_within_rowbin": robust_std(r_centred)}
         # Second, better-identified specification test: with the k = 1 model and its
         # best horizon, the median residual must be ~0 in EVERY range quartile.
@@ -335,10 +327,8 @@ def ground_line_fit(df: pd.DataFrame, cls: str = "cone", min_h_px: float = 10,
     point, resid, sd_by_row, med_by_row = stat(d, with_tables=True)
     boots = cluster_bootstrap(d, stat, n_boot=n_boot)
     est = _with_se(point, boots)
-    k_y0_corr = (float(boots.exponent_k.corr(boots.horizon_y0_free_k))
-                 if len(boots) > 2 else float("nan"))
     lo, _ = _y0_grid(d.yn.to_numpy())
-    degenerate = point["horizon_y0_norm"] <= lo + 1e-3 or point["horizon_y0_free_k"] <= lo + 1e-3
+    degenerate = point["horizon_y0_norm"] <= lo + 1e-3
 
     d["log_ratio"] = resid
     edges = d.groupby("row_q").yn.agg(["min", "max", "count"])
@@ -348,13 +338,13 @@ def ground_line_fit(df: pd.DataFrame, cls: str = "cone", min_h_px: float = 10,
                            "median_resid": med_by_row.reindex(edges.index).to_numpy(),
                            "log_scatter": sd_by_row.reindex(edges.index).to_numpy()})
     return {"n_boxes": len(d), "n_images": d.image.nunique(), "estimates": est, "data": d,
-            "scatter_by_row": hetero, "k_y0_corr": k_y0_corr, "degenerate": bool(degenerate)}
+            "scatter_by_row": hetero, "degenerate": bool(degenerate)}
 
 
 def interpret_ground_fit(fit: dict, object_height_m: float, focal_px_norm: float | None = None) -> list[str]:
     """Turn the fit into plain-language findings (used in the report)."""
     e = fit["estimates"]
-    a, y0, k, sd = (e["slope_H_over_hcam"], e["horizon_y0_norm"], e["exponent_k"],
+    a, y0, sd = (e["slope_H_over_hcam"], e["horizon_y0_norm"],
                     e["resid_robust_std"])
     lines = []
     if fit.get("degenerate"):
@@ -377,27 +367,6 @@ def interpret_ground_fit(fit: dict, object_height_m: float, focal_px_norm: float
         pitch = np.degrees(np.arctan((0.5 - y0.value) / focal_px_norm))
         lines.append(f"  -> implied pitch ≈ {pitch:+.1f}° (positive = tilted down) for f = "
                      f"{focal_px_norm:.2f} × image height.")
-    k_lo, k_hi = k.ci95()
-    y0k = e["horizon_y0_free_k"]
-    corr = fit.get("k_y0_corr", float("nan"))
-    if k_lo <= 1 <= k_hi:
-        verdict = "Consistent with the model."
-    elif k.value > 1:
-        verdict = ("Above 1: far boxes are SMALLER than a flat-ground camera predicts (or near ones larger). "
-                   "Candidate causes: the images mix several vehicles/camera heights and pitches (each "
-                   "with its own horizon), roads that crest or curve upward with range, or tall objects "
-                   "(drums, tubular markers) labelled as cones mostly up close. Selection bias cannot "
-                   "explain it: labelling only unusually large far objects would push k BELOW 1.")
-    else:
-        verdict = ("Below 1: far boxes are LARGER than predicted. Typical cause: selection bias (far "
-                   "objects are only labelled when unusually big), or roads dipping away.")
-    lines.append(f"Exponent k = {k} (95% CI {k_lo:.3f}–{k_hi:.3f}; flat ground + pinhole predicts 1), "
-                 f"fitted jointly with its own horizon {y0k.value * 100:.1f}%. " + verdict
-                 + (f" Bootstrap corr(k, horizon) = {corr:+.2f}: " + (
-                     "k and the horizon are strongly confounded, so k alone is weak evidence; an "
-                     "independent horizon (vanishing point / calibration) is needed to pin it down."
-                     if abs(corr) > 0.7 else "k is reasonably separated from the horizon.")
-                    if np.isfinite(corr) else ""))
     qs = sorted(kk for kk in e if kk.startswith("resid_median_q"))
     bad = [kk for kk in qs if np.isfinite(e[kk].se) and abs(e[kk].value) > 2 * e[kk].se
            and abs(e[kk].value) > 0.03]

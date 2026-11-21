@@ -39,7 +39,7 @@ def test_ground_fit_recovers_geometry():
     e = fit["estimates"]
     assert e["slope_H_over_hcam"].value == pytest.approx(0.7 / 1.3, rel=0.03)
     assert e["horizon_y0_norm"].value == pytest.approx(0.5, abs=0.01)
-    assert e["exponent_k"].value == pytest.approx(1.0, abs=4 * e["exponent_k"].se + 0.02)
+    assert all(abs(e[k].value) < 0.03 for k in e if k.startswith("resid_median_q"))
     assert len(fit["scatter_by_row"]) == 4 and not fit["degenerate"]
     assert e["resid_robust_std"].value == pytest.approx(0.08, abs=0.02)
     assert e["slope_H_over_hcam"].se > 0
@@ -81,15 +81,16 @@ def test_robust_std():
     assert robust_std(x) == pytest.approx(2, rel=0.05)
 
 
-def test_ground_fit_flags_wrong_exponent():
-    df = synthetic_cones()
-    # Bend the data: h proportional to (y - y0)^0.8 instead of ^1.
-    y0 = 360.0
-    df = df.assign(h=lambda d: d.h * ((d.y2 - y0) / 360.0) ** -0.2)
-    df = df.assign(y1=lambda d: d.y2 - d.h)
-    k = ground_line_fit(df, n_boot=30)["estimates"]["exponent_k"]
-    lo, hi = k.ci95()
-    assert hi < 1.0
+def test_ground_fit_flags_mixed_cameras():
+    # Two mounts pooled (different height and horizon): the range-band test
+    # must flag it. (A pure power-law bend is NOT detectable: a shifted
+    # horizon mimics it, which is why the free-exponent fit was dropped.)
+    a = synthetic_cones(h_cam=1.3, horizon=300.0, seed=1)
+    b = synthetic_cones(h_cam=2.6, horizon=420.0, seed=2).assign(image=lambda d: "b" + d.image)
+    e = ground_line_fit(pd.concat([a, b], ignore_index=True), n_boot=30)["estimates"]
+    off = [k for k in e if k.startswith("resid_median_q")
+           and abs(e[k].value) > 2 * e[k].se and abs(e[k].value) > 0.03]
+    assert off
 
 
 def test_mc_log_metrics():
@@ -104,7 +105,7 @@ def test_ground_fit_survives_boxes_above_horizon():
     bad = df.head(12).assign(y2=100.0, y1=80.0, h=20.0)
     fit = ground_line_fit(pd.concat([df, bad], ignore_index=True), n_boot=10)
     e = fit["estimates"]
-    assert np.isfinite(e["exponent_k"].value)
+    assert np.isfinite(e["slope_H_over_hcam"].value)
     assert e["horizon_y0_norm"].value == pytest.approx(0.5, abs=0.02)
 
 
