@@ -1,0 +1,89 @@
+# v2 of the data mix (Nov 21). Differences from data_sources.yaml:
+#   * ROADWork "Drum" -> barrier. Drums (plastic channelizer barrels, ~1 m)
+#     block the robot's path exactly like a barrier does, and ROADWork has
+#     5,499 drum boxes in 1,159 images vs only 611 "Barrier" boxes in 160.
+#     That's ~10x more barrier data from the SAME cameras as the test set.
+#   * barrier_extra disabled: 18 crowded images of Jersey barriers from a
+#     different domain; 3 of them were 63 of the 92 test barriers and the
+#     model scored AP50 0.06 on them (see docs/FINDINGS.md).
+# Output goes to data/merged_v2 so the v1 dataset and its results stay intact.
+#
+# Where the training data comes from and how each source's classes map to ours.
+#
+# Our classes: cone (0), barrier (1), stop_sign (2).
+# BDD100K is NOT used for training: its detection labels have no cone, no
+# barrier, and stop signs are merged into one generic "traffic sign" class
+# (see README "Dataset"). It is only used, optionally, for demo videos.
+#
+# class_map: source class name -> our class name, or null to drop it.
+#            Matching is case-insensitive. Names not listed are dropped too.
+
+output_dir: data/merged_v2           # final merged YOLO dataset
+raw_dir: data/raw                 # downloads land here (git-ignored)
+seed: 0
+
+# Sources that ship without val/test (e.g. ROADWork's Roboflow export is
+# train-only) get these fractions carved out of train. Images are moved in
+# GROUPS (same original image, or same sequence via `group_regex` on a
+# source), so near-duplicates never end up in both train and test.
+split_missing:
+  val: 0.10
+  test: 0.10
+
+sources:
+  # ROADWork work-zone images (CMU) as exported on Roboflow Universe.
+  # https://universe.roboflow.com/roadworkwithdirectionalpanelsallobjects/roadwork_vpanels_all_objects
+  # 5,341 images, CC BY 4.0. Check the latest version number on the page.
+  roadwork:
+    type: roboflow
+    enabled: true
+    workspace: roadworkwithdirectionalpanelsallobjects
+    project: roadwork_vpanels_all_objects
+    version: 3                    # CHECK on the dataset page
+    format: yolov8
+    # File names are phone photos (IMG_3931, IMG_3932, ...): consecutive numbers
+    # are bursts of the same scene. Keep every 25 consecutive numbers together.
+    group_block: 25
+    class_map:
+      cone: cone
+      barrier: barrier
+      drum: barrier               # v2: channelizer drums count as barriers (see header)
+      tubular marker: null        # thin delineator posts, not cones
+      vertical panel pass left: null
+      vertical panel pass right: null
+
+  # Extra barriers (Jersey/concrete + water-filled). CC BY 4.0.
+  # https://universe.roboflow.com/bhornphawis-jungbunjerdsak-y3rsf/barrier_detection
+  barrier_extra:
+    type: roboflow
+    enabled: false                # v2: dropped (see header)
+    workspace: bhornphawis-jungbunjerdsak-y3rsf
+    project: barrier_detection
+    version: 1                    # CHECK on the dataset page
+    format: yolov8
+    class_map:
+      concrete_barrier: barrier
+      water_barrier: barrier
+      traffic_cone: cone
+      crane: null
+
+  # COCO 2017 stop signs (category id 13 in the JSON). Annotations CC BY 4.0.
+  # Only the stop-sign images are downloaded (~1.7k train + ~70 val), not the
+  # 19 GB image zip.
+  coco_stop:
+    type: coco
+    enabled: true
+    categories: {13: stop_sign}   # COCO JSON category id -> our class
+    max_train_images: null        # null = all
+    val_fraction: 0.15            # train2017 -> our train/val; val2017 -> our test
+    background_images: 300        # random COCO train images WITHOUT stop signs, added to train as negatives
+
+  # Any dataset you already have in YOLO format (e.g. a Roboflow zip you
+  # downloaded by hand, or TraCon). Folder must contain images/ and labels/
+  # (optionally per split) and you give the class names in id order.
+  manual_example:
+    type: local_yolo
+    enabled: false
+    path: data/raw/my_dataset
+    names: [cone]
+    class_map: {cone: cone}

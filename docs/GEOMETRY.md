@@ -86,6 +86,28 @@ Z = f · B / d
 
 **Epipolar constraint.** For any two views, corresponding points satisfy `x_Rᵀ F x_L = 0`, where `F` is the fundamental matrix, or `E = [t]ₓ R` in normalised coordinates. For a rectified pair, `R = I` and `t = (B, 0, 0)`. The constraint then reduces to `v_L = v_R`: the match for a pixel lies on the same row. That is why stereo matching is a 1D search along rows.
 
-**Depth resolution.** Differentiating gives `ΔZ = Z² / (f·B) · Δd`. A one-pixel disparity error therefore causes a depth error that grows with the square of the distance, so stereo becomes poor at long range. Monocular box-height estimation, `ΔZ/Z = Δh/h`, has error that also grows with range, but only linearly in Z.
+**Depth resolution.** Differentiating `Z = f·B/d` gives `|ΔZ| = Z² / (f·B) · |Δd|`. A one-pixel disparity error therefore causes a depth error that grows with the *square* of the distance.
 
-**Link to this project.** With one moving camera, two frames separated by known ego-motion form the same geometry, with the baseline equal to the distance moved. The same applies to tracking the change in a box's height over frames (DMODE, Agand et al. 2022). Either one is a natural next step after the optical-flow extra.
+**The monocular method has the same form.** From `Z = f·H/h`, a pixel error in box height gives `|ΔZ| = Z² / (f·H) · |Δh|`. The known object height `H` plays the role of the baseline `B`. A 0.70 m cone is in effect a 0.70 m "baseline", which is larger than most stereo rigs. The catch is that `H` itself is uncertain. The analysis in FINDINGS.md finds real height spread of ×/÷ 1.45 per box, and that systematic error dwarfs the pixel term. Stereo has no such term: `B` is known to a millimetre after calibration.
+
+Error for 1 px of disparity or box-height error, with f = 1005 px. These are the numbers from `src/stereo.py`:
+
+| Z (m) | stereo B = 0.12 m | stereo B = 0.30 m | mono, 0.70 m cone (pixel term only) |
+|---|---|---|---|
+| 2 | 0.03 m | 0.01 m | 0.01 m |
+| 5 | 0.21 m | 0.08 m | 0.04 m |
+| 10 | 0.83 m | 0.33 m | 0.14 m |
+| 20 | 3.3 m | 1.3 m | 0.57 m |
+| 40 | 13.3 m | 5.3 m | 2.3 m |
+
+At 10 m the height spread alone adds roughly ±4 m to the mono estimate. A calibrated stereo pair's 1 px error only catches up with mono's height error (about 0.4·Z) where `Z²/(f·B) = 0.4·Z`, which is about 48 m for B = 0.12 m and 120 m for B = 0.30 m. Inside the detector's useful range (about 20 m), stereo is clearly more accurate.
+
+**Motion stereo with one camera.** Suppose the robot drives forward a known distance `B` between two frames (from odometry), and the object is static. Then `Z₁ = Z₂ + B`, with `h₁ = f·H/Z₁` and `h₂ = f·H/Z₂`, so
+
+```
+h₂ / h₁ = Z₁ / Z₂ = (Z₂ + B) / Z₂   ⇒   Z₂ = B · h₁ / (h₂ − h₁)
+```
+
+Neither `f` nor `H` appears. The driven distance is the baseline and the box growth `h₂ − h₁` is the "disparity", with the same `1/disparity` error behaviour. It needs the same object in both frames, which is what the optical-flow tracker provides (`src/tracking.py`, `distance_from_scale_change`). It is only usable once the box has grown by several pixels. It also removes the dominant error source of the single-frame method, the unknown real height. Related work: DMODE, Agand et al. 2022.
+
+**Epipolar view of the same thing.** For pure forward motion, `R = I` and `t = (0, 0, B)`. The epipole is the focus of expansion at the principal point, and epipolar lines are rays from it. A static point slides outward along its ray, and the distance it slides gives depth, just as disparity does along a row in the rectified case. `src/stereo.py` has `essential_matrix(R, t)`, and `tests/test_stereo.py` checks numerically that `x_Rᵀ E x_L = 0`.
