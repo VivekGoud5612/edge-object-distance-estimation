@@ -1,5 +1,7 @@
 # Edge Object Distance Estimation
 
+**Author:** Vivek Goud Cheruku · [vivekgoud.ch@gmail.com](mailto:vivekgoud.ch@gmail.com) · 8498060466 (see [Contact](#contact))
+
 This project detects **cones, barriers and stop signs** in camera frames, estimates **how far away each one is** using camera geometry only, and makes the model **fast enough for edge hardware**. It was built as the ERIC Robotics take-home assignment.
 
 ```
@@ -227,3 +229,11 @@ data/, runs/, models/   datasets, training runs, exports (git-ignored)
 - Datasets: ROADWork (Ghosh et al., ICCV 2025), Roboflow Universe contributors, COCO (Lin et al., 2014).
 - Geometry references: Dhall, Dai and Van Gool, "Real-time 3D Traffic Cone Detection for Autonomous Driving" (2019).
 - Code: MIT, see [LICENSE](LICENSE). Ultralytics is AGPL-3.0, so anyone who redistributes this code together with Ultralytics is bound by the AGPL for the combined work.
+
+## Contact
+
+| | |
+|---|---|
+| **Name** | Vivek Goud Cheruku |
+| **Phone** | 8498060466 |
+| **Email** | [vivekgoud.ch@gmail.com](mailto:vivekgoud.ch@gmail.com) |
